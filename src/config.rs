@@ -5,6 +5,25 @@ use ipnet::IpNet;
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
+struct RawConfig {
+    api_token: Option<String>,
+    bind_addr: Option<String>,
+    bind_port: Option<String>,
+    allowed_cidr: Option<String>,
+}
+
+impl RawConfig {
+    fn from_env() -> Self {
+        Self {
+            api_token: env::var("MCP_API_TOKEN").ok(),
+            bind_addr: env::var("BIND_ADDR").ok(),
+            bind_port: env::var("BIND_PORT").ok(),
+            allowed_cidr: env::var("MCP_ALLOWED_CIDR").ok(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub api_token: String,
     pub bind_addr: String,
@@ -26,25 +45,35 @@ pub enum ConfigError {
 
 impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
-        let api_token = env::var("MCP_API_TOKEN")
-            .ok()
-            .map(|token| token.trim().to_string())
+        Self::parse(RawConfig::from_env())
+    }
+
+    fn parse(raw: RawConfig) -> Result<Self, ConfigError> {
+        let api_token = raw
+            .api_token
+            .as_deref()
+            .map(str::trim)
             .filter(|token| !token.is_empty())
+            .map(ToString::to_string)
             .ok_or(ConfigError::MissingApiToken)?;
 
-        let bind_addr = env::var("BIND_ADDR")
-            .ok()
-            .map(|addr| addr.trim().to_string())
+        let bind_addr = raw
+            .bind_addr
+            .as_deref()
+            .map(str::trim)
             .filter(|addr| !addr.is_empty())
+            .map(ToString::to_string)
             .unwrap_or_else(|| "127.0.0.1".to_string());
-        let bind_port = env::var("BIND_PORT")
-            .ok()
+        let bind_port = raw
+            .bind_port
+            .as_deref()
             .map(|value| value.parse::<u16>().map_err(|_| ConfigError::InvalidPort))
             .transpose()?
             .unwrap_or(8080);
-        let allowed_cidr = env::var("MCP_ALLOWED_CIDR")
-            .ok()
-            .map(|value| value.trim().to_string())
+        let allowed_cidr = raw
+            .allowed_cidr
+            .as_deref()
+            .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(|value| {
                 value
@@ -75,14 +104,25 @@ impl Config {
 mod tests {
     use super::*;
 
+    fn raw_config(
+        api_token: Option<&str>,
+        bind_addr: Option<&str>,
+        bind_port: Option<&str>,
+        allowed_cidr: Option<&str>,
+    ) -> RawConfig {
+        RawConfig {
+            api_token: api_token.map(ToString::to_string),
+            bind_addr: bind_addr.map(ToString::to_string),
+            bind_port: bind_port.map(ToString::to_string),
+            allowed_cidr: allowed_cidr.map(ToString::to_string),
+        }
+    }
+
     #[test]
     fn parse_defaults() {
-        env::set_var("MCP_API_TOKEN", "abc");
-        env::remove_var("BIND_ADDR");
-        env::remove_var("BIND_PORT");
-        env::remove_var("MCP_ALLOWED_CIDR");
+        let raw = raw_config(Some("abc"), None, None, None);
 
-        let config = Config::from_env().expect("config should parse");
+        let config = Config::parse(raw).expect("config should parse");
         assert_eq!(config.bind_addr, "127.0.0.1");
         assert_eq!(config.bind_port, 8080);
         assert_eq!(config.allowed_cidr, None);
@@ -90,18 +130,17 @@ mod tests {
 
     #[test]
     fn missing_token_fails() {
-        env::remove_var("MCP_API_TOKEN");
+        let raw = raw_config(None, None, None, None);
 
-        let err = Config::from_env().expect_err("expected missing token error");
+        let err = Config::parse(raw).expect_err("expected missing token error");
         assert!(matches!(err, ConfigError::MissingApiToken));
     }
 
     #[test]
     fn allowed_cidr_parses_when_valid() {
-        env::set_var("MCP_API_TOKEN", "abc");
-        env::set_var("MCP_ALLOWED_CIDR", "10.0.0.0/8");
+        let raw = raw_config(Some("abc"), None, None, Some("10.0.0.0/8"));
 
-        let config = Config::from_env().expect("config should parse");
+        let config = Config::parse(raw).expect("config should parse");
         assert_eq!(
             config.allowed_cidr,
             Some("10.0.0.0/8".parse().expect("valid cidr"))
@@ -110,10 +149,17 @@ mod tests {
 
     #[test]
     fn invalid_allowed_cidr_fails() {
-        env::set_var("MCP_API_TOKEN", "abc");
-        env::set_var("MCP_ALLOWED_CIDR", "not-a-cidr");
+        let raw = raw_config(Some("abc"), None, None, Some("not-a-cidr"));
 
-        let err = Config::from_env().expect_err("expected invalid cidr error");
+        let err = Config::parse(raw).expect_err("expected invalid cidr error");
         assert!(matches!(err, ConfigError::InvalidAllowedCidr));
+    }
+
+    #[test]
+    fn invalid_port_fails() {
+        let raw = raw_config(Some("abc"), None, Some("not-a-port"), None);
+
+        let err = Config::parse(raw).expect_err("expected invalid port error");
+        assert!(matches!(err, ConfigError::InvalidPort));
     }
 }
