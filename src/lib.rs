@@ -47,6 +47,7 @@ pub fn build_app(state: AppState) -> Router {
         ));
 
     Router::new()
+        .route("/", get(api::discovery).post(api::mcp_endpoint))
         .route("/health", get(api::health))
         .route("/.well-known/mcp", get(api::discovery))
         .route("/mcp", post(api::mcp_endpoint))
@@ -241,6 +242,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn root_discovery_is_public() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .method("GET")
+                    .body(Body::empty())
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn mcp_unknown_method_returns_method_not_found() {
         let response = app()
             .oneshot(
@@ -315,6 +332,37 @@ mod tests {
             body_json["result"]["metadata"]["restEndpoints"]["logs"],
             "/logs"
         );
+    }
+
+    #[tokio::test]
+    async fn root_mcp_initialize_returns_result() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 1);
+        assert_eq!(body_json["result"]["protocolVersion"], "2024-11-05");
     }
 
     #[tokio::test]

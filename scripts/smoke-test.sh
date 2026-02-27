@@ -143,6 +143,21 @@ assert_contains "$mcp_initialize_body" '"protocolVersion":"2024-11-05"' "initial
 assert_contains "$mcp_initialize_body" '"services":"/services"' "initialize did not advertise services endpoint in metadata"
 assert_contains "$mcp_initialize_body" '"logs":"/logs"' "initialize did not advertise logs endpoint in metadata"
 
+echo "[smoke] checking POST / initialize"
+root_initialize_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":11,"method":"initialize"}' \
+  "${BASE_URL}/")"
+root_initialize_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":11,"method":"initialize"}' \
+  "${BASE_URL}/")"
+[[ "$root_initialize_status" == "200" ]] || fail "/ initialize returned status ${root_initialize_status}, expected 200"
+assert_contains "$root_initialize_body" '"jsonrpc":"2.0"' "root initialize did not return jsonrpc envelope"
+assert_contains "$root_initialize_body" '"protocolVersion":"2024-11-05"' "root initialize did not return protocolVersion"
+assert_contains "$root_initialize_body" '"services":"/services"' "root initialize did not advertise services endpoint in metadata"
+assert_contains "$root_initialize_body" '"logs":"/logs"' "root initialize did not advertise logs endpoint in metadata"
+
 echo "[smoke] checking POST /mcp ping"
 mcp_ping_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
