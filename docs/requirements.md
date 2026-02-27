@@ -6,7 +6,7 @@ Implement an MCP server that exposes a REST API for monitoring systemd units.
 
 MVP scope is limited to:
 - Listing systemd service units and their current state.
-- Reading journald logs with optional filtering and ordering.
+- Reading journald logs with optional filtering and limiting.
 - Exposing the server over HTTP.
 - Restricting access using a static token configured via environment variable.
 
@@ -129,9 +129,7 @@ Error handling:
 
 Behavior:
 - Must return journald log entries in a single response.
-- Must always sort logs by timestamp.
-- Default sort order is ascending (`asc`) by timestamp.
-- Optional query parameter `order` supports `asc` or `desc`.
+- Must return log entries in descending timestamp order (newest first).
 - Optional query parameter `priority` applies a minimum severity threshold for systemd/journald priority (`0..7`) or common aliases (`emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`), returning that priority and higher-severity entries.
 - Optional query parameter `unit` filters by systemd unit identifier.
 - `unit` must use strict parameter validation and contain only ASCII alphanumeric characters, dots (`.`), dashes (`-`), underscores (`_`), at-sign (`@`), and colon (`:`).
@@ -176,7 +174,7 @@ Request source IP allowlist:
 - Rejected requests must return `403 Forbidden` with the standard JSON error shape.
 
 Journal log queries:
-- The `journalctl` subprocess must be invoked with `--lines=<limit>` to bound output at the source and prevent unbounded memory usage.
+- The `journalctl` subprocess must be invoked with `--reverse --lines=<limit>` to bound output at the source and ensure newest-first results.
 
 ## 5. Error Response Format
 

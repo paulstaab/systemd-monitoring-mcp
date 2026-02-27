@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use crate::{
     errors::AppError,
-    systemd_client::{JournalLogEntry, LogQuery, LogSortOrder, UnitStatus},
+    systemd_client::{JournalLogEntry, LogQuery, UnitStatus},
     AppState,
 };
 
@@ -19,7 +19,6 @@ pub struct LogsQueryParams {
     start_utc: Option<String>,
     end_utc: Option<String>,
     limit: Option<usize>,
-    order: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -151,25 +150,12 @@ fn build_log_query(params: LogsQueryParams) -> Result<LogQuery, AppError> {
         ));
     }
 
-    let order_value = params.order.map(|order| order.to_ascii_lowercase());
-    let order = match order_value.as_deref() {
-        None | Some("asc") => LogSortOrder::Asc,
-        Some("desc") => LogSortOrder::Desc,
-        Some(_) => {
-            return Err(AppError::bad_request(
-                "invalid_order",
-                "order must be one of: asc, desc",
-            ))
-        }
-    };
-
     Ok(LogQuery {
         priority: normalize_priority(params.priority)?,
         unit: normalize_unit(params.unit)?,
         start_utc,
         end_utc,
         limit,
-        order,
     })
 }
 
@@ -276,7 +262,7 @@ fn json_rpc_error(id: Option<Value>, code: i32, message: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_log_query, LogSortOrder, LogsQueryParams, MAX_LOG_LIMIT};
+    use super::{build_log_query, LogsQueryParams, MAX_LOG_LIMIT};
 
     #[test]
     fn rejects_limit_above_max() {
@@ -286,7 +272,6 @@ mod tests {
             start_utc: None,
             end_utc: None,
             limit: Some(MAX_LOG_LIMIT + 1),
-            order: None,
         });
 
         let error = query.expect_err("expected invalid limit");
@@ -301,7 +286,6 @@ mod tests {
             start_utc: Some("2026-02-27T12:00:00+01:00".to_string()),
             end_utc: Some("2026-02-27T13:00:00Z".to_string()),
             limit: Some(10),
-            order: None,
         });
 
         let error = query.expect_err("expected invalid utc time");
@@ -309,20 +293,18 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_priority_alias_and_desc_order() {
+    fn normalizes_priority_alias() {
         let query = build_log_query(LogsQueryParams {
             priority: Some("error".to_string()),
             unit: Some("ssh_service-01@host:prod".to_string()),
             start_utc: Some("2026-02-27T00:00:00Z".to_string()),
             end_utc: Some("2026-02-27T01:00:00Z".to_string()),
             limit: Some(10),
-            order: Some("DESC".to_string()),
         })
         .expect("query should build");
 
         assert_eq!(query.priority.as_deref(), Some("3"));
         assert_eq!(query.unit.as_deref(), Some("ssh_service-01@host:prod"));
-        assert!(matches!(query.order, LogSortOrder::Desc));
     }
 
     #[test]
@@ -333,7 +315,6 @@ mod tests {
             start_utc: Some("2026-02-27T00:00:00Z".to_string()),
             end_utc: Some("2026-02-27T01:00:00Z".to_string()),
             limit: Some(10),
-            order: None,
         });
 
         let error = query.expect_err("expected invalid unit");
@@ -348,7 +329,6 @@ mod tests {
             start_utc: None,
             end_utc: None,
             limit: Some(10),
-            order: None,
         });
 
         let error = query.expect_err("expected missing time range");

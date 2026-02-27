@@ -15,12 +15,6 @@ pub struct UnitStatus {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogSortOrder {
-    Asc,
-    Desc,
-}
-
 #[derive(Debug, Clone)]
 pub struct LogQuery {
     pub priority: Option<String>,
@@ -28,7 +22,6 @@ pub struct LogQuery {
     pub start_utc: Option<DateTime<Utc>>,
     pub end_utc: Option<DateTime<Utc>>,
     pub limit: usize,
-    pub order: LogSortOrder,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -163,19 +156,8 @@ impl UnitProvider for DbusSystemdClient {
     async fn list_journal_logs(&self, query: &LogQuery) -> Result<Vec<JournalLogEntry>, AppError> {
         let mut command = Command::new("journalctl");
         command.arg("--output=json").arg("--no-pager").arg("--utc");
-
-        // Bound the output at the kernel/journald level to avoid reading unbounded data
-        // into memory. We request the limit from journalctl directly.
-        let limit = query.limit;
-        match query.order {
-            LogSortOrder::Desc => {
-                command.arg("--reverse");
-                command.arg(format!("--lines={limit}"));
-            }
-            LogSortOrder::Asc => {
-                command.arg(format!("--lines={limit}"));
-            }
-        }
+        command.arg("--reverse");
+        command.arg(format!("--lines={}", query.limit));
 
         if let Some(priority) = &query.priority {
             command.arg(format!("--priority=0..{priority}"));

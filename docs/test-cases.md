@@ -4,11 +4,9 @@
 
 - `GET /logs` without authorization header returns `401` with `missing_token` code.
 - `GET /logs` with valid bearer token returns `200` and a JSON array.
+- `GET /logs` returns log entries in descending timestamp order (newest first).
 - `GET /logs?limit=0` returns `400` with `invalid_limit` code.
 - `GET /logs?limit=1001` returns `400` with `invalid_limit` code.
-- `GET /logs?order=asc` returns `200` and sorted logs in ascending timestamp order.
-- `GET /logs?order=desc` returns `200` and sorted logs in descending timestamp order.
-- `GET /logs?order=invalid` returns `400` with `invalid_order` code.
 - `GET /logs?priority=error` maps to journald priority `3`, applies minimum-threshold filtering, and returns `200`.
 - `GET /logs?priority=9` returns `400` with `invalid_priority` code.
 - `GET /logs?unit=sshd_service-01@host:prod` returns only entries matching that unit identifier.

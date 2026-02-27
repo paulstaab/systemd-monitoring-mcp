@@ -183,7 +183,13 @@ mod tests {
 
     #[test]
     fn allowed_cidr_parses_when_valid() {
-        let raw = raw_config(Some("abcdefghijklmnop"), None, None, Some("10.0.0.0/8"), None);
+        let raw = raw_config(
+            Some("abcdefghijklmnop"),
+            None,
+            None,
+            Some("10.0.0.0/8"),
+            None,
+        );
 
         let config = Config::parse(raw).expect("config should parse");
         assert_eq!(

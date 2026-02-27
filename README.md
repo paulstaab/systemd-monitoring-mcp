@@ -8,7 +8,7 @@ MCP server for monitoring a Linux server over HTTP.
 - `GET /` and `GET /.well-known/mcp` public MCP discovery endpoints.
 - `POST /` and `POST /mcp` MCP JSON-RPC endpoints (bearer-token protected).
 - `GET /services` protected endpoint returning systemd `*.service` services.
-- `GET /logs` protected endpoint returning journald logs with filter/sort options.
+- `GET /logs` protected endpoint returning journald logs with filter/limit options.
 - Bearer-token authentication using `MCP_API_TOKEN` (constant-time HMAC comparison).
 - Optional CIDR-based IP allowlist with trusted-proxy support (`X-Forwarded-For`).
 
@@ -66,7 +66,7 @@ curl -s \
 ```bash
 curl -s \
 	-H "Authorization: Bearer $MCP_API_TOKEN" \
-	"http://127.0.0.1:8080/logs?priority=err&unit=sshd_service&start_utc=2026-02-27T00:00:00Z&end_utc=2026-02-27T01:00:00Z&limit=100&order=desc"
+	"http://127.0.0.1:8080/logs?priority=err&unit=sshd_service&start_utc=2026-02-27T00:00:00Z&end_utc=2026-02-27T01:00:00Z&limit=100"
 ```
 
 Supported `/logs` query parameters:
@@ -74,4 +74,3 @@ Supported `/logs` query parameters:
 - `unit`: unit identifier
 - `start_utc`, `end_utc` (required): RFC3339 UTC (`Z`) timestamps
 - `limit`: integer `1..1000`
-- `order`: `asc` (default) or `desc`

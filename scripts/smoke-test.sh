@@ -191,8 +191,8 @@ logs_unauth_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/logs"
 assert_contains "$logs_unauth_body" '"code":"missing_token"' "/logs without token body did not contain missing_token"
 
 echo "[smoke] checking GET /logs with token"
-logs_auth_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=10&order=asc")"
-logs_auth_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=10&order=asc")"
+logs_auth_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=10")"
+logs_auth_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=10")"
 [[ "$logs_auth_status" == "200" ]] || fail "/logs with token returned ${logs_auth_status}, expected 200"
 assert_contains "$logs_auth_body" '[' "/logs with token returned 200 but not a JSON array"
 

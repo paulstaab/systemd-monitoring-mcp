@@ -120,7 +120,48 @@ fn parse_bearer_token(value: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_bearer_token, tokens_match};
+    use std::sync::Arc;
+
+    use axum::{
+        extract::connect_info::ConnectInfo,
+        http::{header, Request},
+    };
+
+    use crate::{systemd_client::DbusSystemdClient, AppState};
+
+    use super::{extract_client_ip, parse_bearer_token, tokens_match};
+
+    fn state_with_trusted_proxies(trusted_proxies: &[&str]) -> AppState {
+        AppState::new(
+            "abcdefghijklmnop".to_string(),
+            None,
+            trusted_proxies
+                .iter()
+                .map(|cidr| cidr.parse().expect("valid cidr"))
+                .collect(),
+            Arc::new(DbusSystemdClient::new()),
+        )
+    }
+
+    fn request_with_peer_and_optional_xff(
+        peer_ip: [u8; 4],
+        xff: Option<&str>,
+    ) -> Request<axum::body::Body> {
+        let mut builder = Request::builder().uri("/logs").method("GET");
+        if let Some(xff_value) = xff {
+            builder = builder.header(
+                header::HeaderName::from_static("x-forwarded-for"),
+                xff_value,
+            );
+        }
+        let mut request = builder
+            .body(axum::body::Body::empty())
+            .expect("request build");
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(std::net::SocketAddr::from((peer_ip, 9000))));
+        request
+    }
 
     #[test]
     fn parses_bearer_token() {
@@ -137,5 +178,60 @@ mod tests {
         // the config layer enforces minimum token length so this case
         // never arises in production.
         assert!(tokens_match("", ""));
+    }
+
+    #[test]
+    fn trusted_peer_with_valid_xff_uses_xff_ip() {
+        let state = state_with_trusted_proxies(&["10.0.0.0/8"]);
+        let request =
+            request_with_peer_and_optional_xff([10, 10, 10, 10], Some("203.0.113.7, 10.0.0.1"));
+
+        let client_ip = extract_client_ip(&state, &request).expect("client ip extraction");
+
+        assert_eq!(
+            client_ip,
+            "203.0.113.7".parse::<std::net::IpAddr>().expect("valid ip")
+        );
+    }
+
+    #[test]
+    fn untrusted_peer_with_xff_ignores_xff_and_uses_peer_ip() {
+        let state = state_with_trusted_proxies(&["10.0.0.0/8"]);
+        let request = request_with_peer_and_optional_xff([192, 168, 1, 10], Some("203.0.113.7"));
+
+        let client_ip = extract_client_ip(&state, &request).expect("client ip extraction");
+
+        assert_eq!(
+            client_ip,
+            "192.168.1.10"
+                .parse::<std::net::IpAddr>()
+                .expect("valid ip")
+        );
+    }
+
+    #[test]
+    fn trusted_peer_with_missing_xff_uses_peer_ip() {
+        let state = state_with_trusted_proxies(&["10.0.0.0/8"]);
+        let request = request_with_peer_and_optional_xff([10, 10, 10, 10], None);
+
+        let client_ip = extract_client_ip(&state, &request).expect("client ip extraction");
+
+        assert_eq!(
+            client_ip,
+            "10.10.10.10".parse::<std::net::IpAddr>().expect("valid ip")
+        );
+    }
+
+    #[test]
+    fn trusted_peer_with_invalid_xff_uses_peer_ip() {
+        let state = state_with_trusted_proxies(&["10.0.0.0/8"]);
+        let request = request_with_peer_and_optional_xff([10, 10, 10, 10], Some("not-an-ip"));
+
+        let client_ip = extract_client_ip(&state, &request).expect("client ip extraction");
+
+        assert_eq!(
+            client_ip,
+            "10.10.10.10".parse::<std::net::IpAddr>().expect("valid ip")
+        );
     }
 }
