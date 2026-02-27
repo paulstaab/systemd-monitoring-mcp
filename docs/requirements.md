@@ -129,7 +129,7 @@ Behavior:
 - Must always sort logs by timestamp.
 - Default sort order is ascending (`asc`) by timestamp.
 - Optional query parameter `order` supports `asc` or `desc`.
-- Optional query parameter `priority` filters by systemd/journald priority (`0..7`) or common aliases (`emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`).
+- Optional query parameter `priority` applies a minimum severity threshold for systemd/journald priority (`0..7`) or common aliases (`emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`), returning that priority and higher-severity entries.
 - Optional query parameter `unit` filters by systemd unit identifier.
 - `unit` must use strict parameter validation and contain only ASCII alphanumeric characters, dots (`.`), dashes (`-`), underscores (`_`), at-sign (`@`), and colon (`:`).
 - Required query parameters `start_utc` and `end_utc` filter by inclusive UTC timerange.

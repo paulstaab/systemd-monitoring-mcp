@@ -63,7 +63,7 @@ curl -s \
 ```
 
 Supported `/logs` query parameters:
-- `priority`: `0..7` or aliases (`emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`)
+- `priority`: minimum severity threshold (`0` to `7` or aliases like `err`); returns that priority and higher-severity entries
 - `unit`: unit identifier containing only ASCII letters/digits, dashes (`-`), underscores (`_`), at-sign (`@`), and colon (`:`)
 - `start_utc`, `end_utc` (required): RFC3339 UTC (`Z`) timestamps
 - `limit`: integer `1..1000`
