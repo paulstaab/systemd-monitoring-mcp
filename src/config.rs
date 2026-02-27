@@ -32,7 +32,11 @@ impl Config {
             .filter(|token| !token.is_empty())
             .ok_or(ConfigError::MissingApiToken)?;
 
-        let bind_addr = env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let bind_addr = env::var("BIND_ADDR")
+            .ok()
+            .map(|addr| addr.trim().to_string())
+            .filter(|addr| !addr.is_empty())
+            .unwrap_or_else(|| "127.0.0.1".to_string());
         let bind_port = env::var("BIND_PORT")
             .ok()
             .map(|value| value.parse::<u16>().map_err(|_| ConfigError::InvalidPort))
