@@ -242,7 +242,7 @@ fn normalize_unit(unit: Option<String>) -> Result<Option<String>, AppError> {
     if normalized.is_empty() {
         return Err(AppError::bad_request(
             "invalid_unit",
-            "unit must contain only alphanumeric characters, dashes, underscores, @, and :",
+            "unit must contain only alphanumeric characters, dashes, underscores, dots, @, and :",
         ));
     }
 
@@ -252,10 +252,11 @@ fn normalize_unit(unit: Option<String>) -> Result<Option<String>, AppError> {
             || character == '_'
             || character == '@'
             || character == ':'
+            || character == '.'
     }) {
         return Err(AppError::bad_request(
             "invalid_unit",
-            "unit must contain only alphanumeric characters, dashes, underscores, @, and :",
+            "unit must contain only alphanumeric characters, dashes, underscores, dots, @, and :",
         ));
     }
 
@@ -328,7 +329,7 @@ mod tests {
     fn rejects_unit_with_disallowed_characters() {
         let query = build_log_query(LogsQueryParams {
             priority: None,
-            unit: Some("sshd.service".to_string()),
+            unit: Some("sshd/service".to_string()),
             start_utc: Some("2026-02-27T00:00:00Z".to_string()),
             end_utc: Some("2026-02-27T01:00:00Z".to_string()),
             limit: Some(10),

@@ -180,8 +180,9 @@ impl UnitProvider for DbusSystemdClient {
             command.arg(format!("--until={}", end_utc.to_rfc3339()));
         }
 
-        let output = command
-            .output()
+        let output = tokio::task::spawn_blocking(move || command.output())
+            .await
+            .map_err(|err| AppError::internal(format!("failed to spawn journalctl task: {err}")))?
             .map_err(|err| AppError::internal(format!("failed to execute journalctl: {err}")))?;
 
         if !output.status.success() {
