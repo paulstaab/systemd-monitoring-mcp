@@ -94,12 +94,13 @@ Minimum response body fields:
 
 ### 3.4 Endpoint: MCP Protocol (Minimal JSON-RPC)
 - Method: `POST`
-- Path: `/mcp`
+- Path: `/mcp` (primary) and `/` (compatibility alias for MCP clients that post to root)
 - Authentication: not required for initial infrastructure scaffold.
 
 Behavior:
 - Must accept JSON-RPC 2.0 request envelopes.
 - Must return JSON-RPC 2.0 response envelopes.
+- Both `/mcp` and `/` must provide equivalent JSON-RPC behavior.
 - Initial supported methods:
 	- `initialize`
 	- `ping`
@@ -128,7 +129,7 @@ Behavior:
 - Must always sort logs by timestamp.
 - Default sort order is ascending (`asc`) by timestamp.
 - Optional query parameter `order` supports `asc` or `desc`.
-- Optional query parameter `priority` filters by systemd/journald priority (`0..7`) or common aliases (`emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`).
+- Optional query parameter `priority` applies a minimum severity threshold for systemd/journald priority (`0..7`) or common aliases (`emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`), returning that priority and higher-severity entries.
 - Optional query parameter `unit` filters by systemd unit identifier.
 - `unit` must use strict parameter validation and contain only ASCII alphanumeric characters, dots (`.`), dashes (`-`), underscores (`_`), at-sign (`@`), and colon (`:`).
 - Required query parameters `start_utc` and `end_utc` filter by inclusive UTC timerange.

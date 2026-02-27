@@ -9,7 +9,7 @@
 - `GET /logs?order=asc` returns `200` and sorted logs in ascending timestamp order.
 - `GET /logs?order=desc` returns `200` and sorted logs in descending timestamp order.
 - `GET /logs?order=invalid` returns `400` with `invalid_order` code.
-- `GET /logs?priority=error` maps to journald priority `3` and returns `200`.
+- `GET /logs?priority=error` maps to journald priority `3`, applies minimum-threshold filtering, and returns `200`.
 - `GET /logs?priority=9` returns `400` with `invalid_priority` code.
 - `GET /logs?unit=sshd_service-01@host:prod` returns only entries matching that unit identifier.
 - `GET /logs?unit=sshd.service` returns `400` with `invalid_unit` code.
@@ -22,3 +22,4 @@
 
 - `GET /.well-known/mcp` includes `logs_endpoint` set to `/logs`.
 - `POST /mcp` with `initialize` includes `metadata.restEndpoints.logs` set to `/logs`.
+- `POST /` with `initialize` returns `200` and includes `metadata.restEndpoints.logs` set to `/logs`.

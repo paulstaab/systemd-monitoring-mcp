@@ -5,6 +5,7 @@ MCP server for monitoring a Linux server over HTTP.
 ## Features (MVP)
 
 - `GET /health` public health endpoint.
+- `POST /` and `POST /mcp` MCP JSON-RPC endpoints (both supported for client compatibility).
 - `GET /services` protected endpoint returning systemd `*.service` services.
 - `GET /logs` protected endpoint returning journald logs with filter/sort options.
 - Bearer-token authentication using `MCP_API_TOKEN`.
@@ -36,6 +37,15 @@ cargo run
 curl -s http://127.0.0.1:8080/health
 ```
 
+### MCP initialize (Copilot-compatible root path)
+
+```bash
+curl -s \
+	-H "Content-Type: application/json" \
+	-d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+	http://127.0.0.1:8080/
+```
+
 ### List services (authorized)
 
 ```bash
@@ -53,9 +63,8 @@ curl -s \
 ```
 
 Supported `/logs` query parameters:
-- `priority`: `0..7` or aliases (`emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`)
+- `priority`: minimum severity threshold (`0` to `7` or aliases like `err`); returns that priority and higher-severity entries
 - `unit`: unit identifier
 - `start_utc`, `end_utc` (required): RFC3339 UTC (`Z`) timestamps
 - `limit`: integer `1..1000`
 - `order`: `asc` (default) or `desc`
-
