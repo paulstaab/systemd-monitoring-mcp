@@ -165,7 +165,7 @@ impl UnitProvider for DbusSystemdClient {
         command.arg("--output=json").arg("--no-pager").arg("--utc");
 
         if let Some(priority) = &query.priority {
-            command.arg(format!("--priority={priority}"));
+            command.arg(format!("--priority=0..{priority}"));
         }
 
         if let Some(unit) = &query.unit {
