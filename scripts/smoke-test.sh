@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 HOST="${SMOKE_HOST:-127.0.0.1}"
 PORT="${SMOKE_PORT:-8080}"
-TOKEN="${SMOKE_TOKEN:-change-me}"
+TOKEN="${SMOKE_TOKEN:-change-me-token-16}"
 BINARY_PATH="${SMOKE_BINARY:-${ROOT_DIR}/target/release/systemd-monitoring-mcp}"
 BASE_URL="http://${HOST}:${PORT}"
 
