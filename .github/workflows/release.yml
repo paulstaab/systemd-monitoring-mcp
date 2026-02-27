@@ -48,7 +48,7 @@ jobs:
           fi
 
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release --locked
 
       - name: Prepare release asset
         id: prepare_asset
