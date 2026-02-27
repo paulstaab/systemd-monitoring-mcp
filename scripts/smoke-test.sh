@@ -183,6 +183,12 @@ services_unauth_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/s
 [[ "$services_unauth_status" == "401" ]] || fail "/services without token returned ${services_unauth_status}, expected 401"
 assert_contains "$services_unauth_body" '"code":"missing_token"' "/services without token body did not contain missing_token"
 
+echo "[smoke] checking GET /services with invalid token"
+services_invalid_token_body="$(curl -sS -H "Authorization: Bearer invalid-token" "${BASE_URL}/services")"
+services_invalid_token_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer invalid-token" "${BASE_URL}/services")"
+[[ "$services_invalid_token_status" == "401" ]] || fail "/services with invalid token returned ${services_invalid_token_status}, expected 401"
+assert_contains "$services_invalid_token_body" '"code":"invalid_token"' "/services with invalid token body did not contain invalid_token"
+
 echo "[smoke] checking GET /services with token"
 services_auth_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/services")"
 services_auth_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/services")"
@@ -195,6 +201,26 @@ logs_unauth_body="$(curl -sS "${BASE_URL}/logs")"
 logs_unauth_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/logs")"
 [[ "$logs_unauth_status" == "401" ]] || fail "/logs without token returned ${logs_unauth_status}, expected 401"
 assert_contains "$logs_unauth_body" '"code":"missing_token"' "/logs without token body did not contain missing_token"
+
+echo "[smoke] checking GET /logs with invalid token"
+logs_invalid_token_body="$(curl -sS -H "Authorization: Bearer invalid-token" "${BASE_URL}/logs")"
+logs_invalid_token_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer invalid-token" "${BASE_URL}/logs")"
+[[ "$logs_invalid_token_status" == "401" ]] || fail "/logs with invalid token returned ${logs_invalid_token_status}, expected 401"
+assert_contains "$logs_invalid_token_body" '"code":"invalid_token"' "/logs with invalid token body did not contain invalid_token"
+
+echo "[smoke] checking POST /mcp ping with invalid token"
+mcp_ping_invalid_token_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer invalid-token" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"ping"}' \
+  "${BASE_URL}/mcp")"
+mcp_ping_invalid_token_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer invalid-token" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"ping"}' \
+  "${BASE_URL}/mcp")"
+[[ "$mcp_ping_invalid_token_status" == "401" ]] || fail "/mcp ping with invalid token returned ${mcp_ping_invalid_token_status}, expected 401"
+assert_contains "$mcp_ping_invalid_token_body" '"code":"invalid_token"' "/mcp ping with invalid token body did not contain invalid_token"
 
 echo "[smoke] checking GET /logs with token"
 logs_auth_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=10")"
