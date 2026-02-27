@@ -12,7 +12,7 @@ MCP server for monitoring a Linux server over HTTP.
 ## Configuration
 
 - `MCP_API_TOKEN` (required): static API token.
-- `BIND_ADDR` (optional, default: `0.0.0.0`)
+- `BIND_ADDR` (optional, default: `127.0.0.1`)
 - `BIND_PORT` (optional, default: `8080`)
 - `MCP_ALLOWED_CIDR` (optional): if set, only requests originating from this CIDR range are accepted.
 
@@ -21,7 +21,7 @@ MCP server for monitoring a Linux server over HTTP.
 ```bash
 export MCP_API_TOKEN="change-me"
 # optional:
-# export BIND_ADDR="0.0.0.0"
+# export BIND_ADDR="127.0.0.1"
 # export BIND_PORT="8080"
 # export MCP_ALLOWED_CIDR="10.0.0.0/8"
 

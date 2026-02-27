@@ -61,7 +61,7 @@ Recommended verification sequence before handoff:
   - `export MCP_API_TOKEN="change-me"`
   - `cargo run`
 - Optional bind settings:
-  - `export BIND_ADDR="0.0.0.0"`
+  - `export BIND_ADDR="127.0.0.1"`
   - `export BIND_PORT="8080"`
 - Smoke checks:
   - `curl -s http://127.0.0.1:8080/health`
