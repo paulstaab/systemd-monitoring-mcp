@@ -7,7 +7,8 @@
 	"features": {
 		"ghcr.io/jsburckhardt/devcontainer-features/codex:1": {},
 		"ghcr.io/siri404/devcontainer-ai-features/gemini-cli:1": {}
-	}
+	},
+	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y libsystemd-dev"
 
 	// Use 'mounts' to make the cargo cache persistent in a Docker Volume.
 	// "mounts": [
