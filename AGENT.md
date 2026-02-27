@@ -9,7 +9,7 @@ a Linux server over HTTP.
   - `GET /health` (public)
   - `GET /services` (requires bearer token)
 - Auth: static token from environment variable `MCP_API_TOKEN`.
-- Unit source: systemd via `libsystemd` + D-Bus integration.
+- Unit source: systemd via `systemd` crate + D-Bus integration.
 
 ## Repository Pointers
 - Requirements: `docs/requirements.md`
@@ -76,4 +76,4 @@ Recommended verification sequence before handoff:
 
 ## Technology
 - `systemd-monitoring-mcp` is a single binary written in Rust
-- It uses [`libsystemd`](https://github.com/lucab/libsystemd-rs) to interact with systemd
+- It uses the [`systemd`](https://github.com/codyps/rust-systemd) crate to interact with systemd and journald

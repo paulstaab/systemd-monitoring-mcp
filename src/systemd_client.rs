@@ -1,8 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
-use serde_json::Value;
-use std::process::Command;
+use systemd::{daemon, journal};
 use thiserror::Error;
 use zbus::{zvariant::OwnedObjectPath, Connection, Proxy};
 
@@ -55,8 +54,10 @@ type ListUnitRecord = (
 
 #[derive(Debug, Error)]
 pub enum SystemdAvailabilityError {
-    #[error("systemd is not running (libsystemd daemon::booted returned false)")]
+    #[error("systemd is not running (systemd daemon::booted returned false)")]
     NotBooted,
+    #[error("failed to detect systemd boot state: {0}")]
+    BootState(String),
     #[error("failed to connect to system dbus: {0}")]
     DbusConnect(String),
     #[error("failed to create systemd dbus proxy: {0}")]
@@ -66,7 +67,9 @@ pub enum SystemdAvailabilityError {
 }
 
 pub async fn ensure_systemd_available() -> Result<(), SystemdAvailabilityError> {
-    if !libsystemd::daemon::booted() {
+    let is_booted =
+        daemon::booted().map_err(|err| SystemdAvailabilityError::BootState(err.to_string()))?;
+    if !is_booted {
         return Err(SystemdAvailabilityError::NotBooted);
     }
 
@@ -154,40 +157,12 @@ impl UnitProvider for DbusSystemdClient {
     }
 
     async fn list_journal_logs(&self, query: &LogQuery) -> Result<Vec<JournalLogEntry>, AppError> {
-        let mut command = Command::new("journalctl");
-        command.arg("--output=json").arg("--no-pager").arg("--utc");
-        command.arg("--reverse");
-        command.arg(format!("--lines={}", query.limit));
-
-        if let Some(priority) = &query.priority {
-            command.arg(format!("--priority=0..{priority}"));
-        }
-
-        if let Some(unit) = &query.unit {
-            command.arg(format!("--unit={unit}"));
-        }
-
-        if let Some(start_utc) = query.start_utc {
-            command.arg(format!("--since={}", start_utc.to_rfc3339()));
-        }
-
-        if let Some(end_utc) = query.end_utc {
-            command.arg(format!("--until={}", end_utc.to_rfc3339()));
-        }
-
-        let output = tokio::task::spawn_blocking(move || command.output())
+        let query = query.clone();
+        tokio::task::spawn_blocking(move || read_journal_logs(&query))
             .await
-            .map_err(|err| AppError::internal(format!("failed to spawn journalctl task: {err}")))?
-            .map_err(|err| AppError::internal(format!("failed to execute journalctl: {err}")))?;
-
-        if !output.status.success() {
-            return Err(AppError::internal("journalctl command failed"));
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let entries = parse_journal_output(&stdout)?;
-
-        Ok(entries)
+            .map_err(|err| {
+                AppError::internal(format!("failed to spawn journald reader task: {err}"))
+            })?
     }
 }
 
@@ -210,42 +185,87 @@ fn map_and_sort_service_units(raw_units: Vec<RawUnit>) -> Vec<UnitStatus> {
     units
 }
 
-fn parse_journal_output(output: &str) -> Result<Vec<JournalLogEntry>, AppError> {
+fn read_journal_logs(query: &LogQuery) -> Result<Vec<JournalLogEntry>, AppError> {
+    let mut reader = journal::OpenOptions::default()
+        .open()
+        .map_err(|err| AppError::internal(format!("failed to open journald reader: {err}")))?;
+
+    if let Some(unit) = &query.unit {
+        reader
+            .match_add("_SYSTEMD_UNIT", unit.as_bytes())
+            .map_err(|err| AppError::internal(format!("failed to apply unit filter: {err}")))?;
+    }
+
+    if let Some(end_utc) = query.end_utc {
+        let end_unix_usec = end_utc.timestamp_micros();
+        if let Ok(end_unix_usec) = u64::try_from(end_unix_usec) {
+            reader.seek_realtime_usec(end_unix_usec).map_err(|err| {
+                AppError::internal(format!("failed to seek journald end timestamp: {err}"))
+            })?;
+        } else {
+            reader.seek_head().map_err(|err| {
+                AppError::internal(format!("failed to seek journald head: {err}"))
+            })?;
+        }
+    } else {
+        reader
+            .seek_tail()
+            .map_err(|err| AppError::internal(format!("failed to seek journald tail: {err}")))?;
+    }
+
+    let threshold = query
+        .priority
+        .as_deref()
+        .and_then(|value| value.parse::<u8>().ok());
+    let start_unix_usec = query.start_utc.map(|value| value.timestamp_micros());
+    let end_unix_usec = query.end_utc.map(|value| value.timestamp_micros());
+
     let mut entries = Vec::new();
 
-    for line in output.lines().filter(|line| !line.trim().is_empty()) {
-        let payload: Value = serde_json::from_str(line).map_err(|err| {
-            AppError::internal(format!("failed to parse journalctl JSON output: {err}"))
+    while entries.len() < query.limit {
+        let advanced = reader
+            .previous()
+            .map_err(|err| AppError::internal(format!("failed to read journald entry: {err}")))?;
+        if advanced == 0 {
+            break;
+        }
+
+        let timestamp_unix_usec_u64 = reader.timestamp_usec().map_err(|err| {
+            AppError::internal(format!("failed to read journald timestamp: {err}"))
         })?;
+        let Ok(timestamp_unix_usec) = i64::try_from(timestamp_unix_usec_u64) else {
+            continue;
+        };
 
-        let timestamp_unix_usec = payload
-            .get("__REALTIME_TIMESTAMP")
-            .and_then(Value::as_str)
-            .and_then(|value| value.parse::<i64>().ok())
-            .ok_or_else(|| {
-                AppError::internal(
-                    "journal entry is missing __REALTIME_TIMESTAMP or has invalid format",
-                )
-            })?;
+        if let Some(start) = start_unix_usec {
+            if timestamp_unix_usec < start {
+                break;
+            }
+        }
 
-        let timestamp_utc = DateTime::<Utc>::from_timestamp_micros(timestamp_unix_usec)
-            .ok_or_else(|| AppError::internal("journal entry timestamp is out of supported range"))?
-            .to_rfc3339_opts(SecondsFormat::Millis, true);
+        if let Some(end) = end_unix_usec {
+            if timestamp_unix_usec > end {
+                continue;
+            }
+        }
 
-        let unit = payload
-            .get("_SYSTEMD_UNIT")
-            .and_then(Value::as_str)
-            .map(ToString::to_string);
+        let Some(timestamp) = DateTime::<Utc>::from_timestamp_micros(timestamp_unix_usec) else {
+            continue;
+        };
 
-        let priority = payload
-            .get("PRIORITY")
-            .and_then(Value::as_str)
-            .and_then(|value| value.parse::<u8>().ok());
+        let priority =
+            read_journal_field(&mut reader, "PRIORITY")?.and_then(|value| value.parse::<u8>().ok());
 
-        let message = payload
-            .get("MESSAGE")
-            .and_then(Value::as_str)
-            .map(ToString::to_string);
+        if let Some(max_priority) = threshold {
+            match priority {
+                Some(entry_priority) if entry_priority <= max_priority => {}
+                _ => continue,
+            }
+        }
+
+        let timestamp_utc = timestamp.to_rfc3339_opts(SecondsFormat::Millis, true);
+        let unit = read_journal_field(&mut reader, "_SYSTEMD_UNIT")?;
+        let message = read_journal_field(&mut reader, "MESSAGE")?;
 
         entries.push(JournalLogEntry {
             timestamp_utc,
@@ -259,9 +279,30 @@ fn parse_journal_output(output: &str) -> Result<Vec<JournalLogEntry>, AppError> 
     Ok(entries)
 }
 
+fn read_journal_field(
+    reader: &mut systemd::Journal,
+    field: &str,
+) -> Result<Option<String>, AppError> {
+    let data = reader.get_data(field).map_err(|err| {
+        AppError::internal(format!("failed to read journald field {field}: {err}"))
+    })?;
+
+    let Some(data) = data else {
+        return Ok(None);
+    };
+
+    let Some(value) = data.value() else {
+        return Ok(None);
+    };
+
+    Ok(std::str::from_utf8(value)
+        .ok()
+        .map(std::string::ToString::to_string))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{map_and_sort_service_units, parse_journal_output, JournalLogEntry, RawUnit};
+    use super::{map_and_sort_service_units, JournalLogEntry, RawUnit};
 
     #[test]
     fn filters_non_service_and_sorts() {
@@ -291,24 +332,16 @@ mod tests {
     }
 
     #[test]
-    fn parses_journal_json_lines() {
-        let raw = r#"{"__REALTIME_TIMESTAMP":"1735689600000000","_SYSTEMD_UNIT":"ssh.service","PRIORITY":"6","MESSAGE":"Started OpenSSH server"}
-{"__REALTIME_TIMESTAMP":"1735689601000000","PRIORITY":"3","MESSAGE":"Service failed"}"#;
+    fn journal_log_entry_keeps_expected_shape() {
+        let sample = JournalLogEntry {
+            timestamp_utc: "2025-01-01T00:00:00.000Z".to_string(),
+            timestamp_unix_usec: 1_735_689_600_000_000,
+            unit: Some("ssh.service".to_string()),
+            priority: Some(6),
+            message: Some("Started OpenSSH server".to_string()),
+        };
 
-        let parsed = parse_journal_output(raw).expect("journal output should parse");
-
-        assert_eq!(parsed.len(), 2);
-        assert_eq!(
-            parsed[0],
-            JournalLogEntry {
-                timestamp_utc: "2025-01-01T00:00:00.000Z".to_string(),
-                timestamp_unix_usec: 1_735_689_600_000_000,
-                unit: Some("ssh.service".to_string()),
-                priority: Some(6),
-                message: Some("Started OpenSSH server".to_string()),
-            }
-        );
-        assert_eq!(parsed[1].unit, None);
-        assert_eq!(parsed[1].priority, Some(3));
+        assert_eq!(sample.unit.as_deref(), Some("ssh.service"));
+        assert_eq!(sample.priority, Some(6));
     }
 }

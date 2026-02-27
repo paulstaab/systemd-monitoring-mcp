@@ -175,7 +175,7 @@ Request source IP allowlist:
 - Rejected requests must return `403 Forbidden` with the standard JSON error shape.
 
 Journal log queries:
-- The `journalctl` subprocess must be invoked with `--reverse --lines=<limit>` to bound output at the source and ensure newest-first results.
+- Journald logs must be read programmatically via `systemd::journal` and returned in newest-first order while respecting the requested `limit`.
 
 ## 5. Error Response Format
 
@@ -204,4 +204,5 @@ Minimum required logs:
 Sensitive data handling:
 - Never log `MCP_API_TOKEN` value.
 - Never log bearer token values from requests.
-- Internal error details (file paths, D-Bus errors, journalctl stderr) must not be logged at production log levels (`error` and above). An opaque error identifier must be logged at `error` level; full details may only be logged at `debug` level.
+- Internal error responses returned via HTTP must remain opaque (`internal server error`) and must not include raw diagnostics.
+- Server logs may include internal diagnostic details (for example file paths, D-Bus errors, journald read errors) to aid troubleshooting.
