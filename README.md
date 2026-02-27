@@ -5,26 +5,32 @@ MCP server for monitoring a Linux server over HTTP.
 ## Features (MVP)
 
 - `GET /health` public health endpoint.
-- `POST /` and `POST /mcp` MCP JSON-RPC endpoints (both supported for client compatibility).
+- `GET /` and `GET /.well-known/mcp` public MCP discovery endpoints.
+- `POST /` and `POST /mcp` MCP JSON-RPC endpoints (bearer-token protected).
 - `GET /services` protected endpoint returning systemd `*.service` services.
-- `GET /logs` protected endpoint returning journald logs with filter/sort options.
-- Bearer-token authentication using `MCP_API_TOKEN`.
+- `GET /logs` protected endpoint returning journald logs with filter/limit options.
+- Bearer-token authentication using `MCP_API_TOKEN` (constant-time HMAC comparison).
+- Optional CIDR-based IP allowlist with trusted-proxy support (`X-Forwarded-For`).
 
 ## Configuration
 
-- `MCP_API_TOKEN` (required): static API token.
-- `BIND_ADDR` (optional, default: `127.0.0.1`)
-- `BIND_PORT` (optional, default: `8080`)
-- `MCP_ALLOWED_CIDR` (optional): if set, only requests originating from this CIDR range are accepted.
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `MCP_API_TOKEN` | **yes** | — | Static API token (minimum 16 characters). |
+| `BIND_ADDR` | no | `127.0.0.1` | Bind address. |
+| `BIND_PORT` | no | `8080` | Bind port. |
+| `MCP_ALLOWED_CIDR` | no | — | If set, only requests originating from this CIDR range are accepted. |
+| `MCP_TRUSTED_PROXIES` | no | — | Comma-separated CIDR list of trusted reverse-proxy addresses. When the direct peer matches, the client IP is read from `X-Forwarded-For`. |
 
 ## Run
 
 ```bash
-export MCP_API_TOKEN="change-me"
+export MCP_API_TOKEN="a-secure-token-at-least-16-chars"
 # optional:
 # export BIND_ADDR="127.0.0.1"
 # export BIND_PORT="8080"
 # export MCP_ALLOWED_CIDR="10.0.0.0/8"
+# export MCP_TRUSTED_PROXIES="172.16.0.1/32,10.0.0.1/32"
 
 cargo run
 ```
@@ -42,6 +48,7 @@ curl -s http://127.0.0.1:8080/health
 ```bash
 curl -s \
 	-H "Content-Type: application/json" \
+	-H "Authorization: Bearer $MCP_API_TOKEN" \
 	-d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
 	http://127.0.0.1:8080/
 ```
@@ -50,7 +57,7 @@ curl -s \
 
 ```bash
 curl -s \
-	-H "Authorization: Bearer change-me" \
+	-H "Authorization: Bearer $MCP_API_TOKEN" \
 	http://127.0.0.1:8080/services
 ```
 
@@ -58,8 +65,8 @@ curl -s \
 
 ```bash
 curl -s \
-	-H "Authorization: Bearer change-me" \
-	"http://127.0.0.1:8080/logs?priority=err&unit=sshd_service&start_utc=2026-02-27T00:00:00Z&end_utc=2026-02-27T01:00:00Z&limit=100&order=desc"
+	-H "Authorization: Bearer $MCP_API_TOKEN" \
+	"http://127.0.0.1:8080/logs?priority=err&unit=sshd_service&start_utc=2026-02-27T00:00:00Z&end_utc=2026-02-27T01:00:00Z&limit=100"
 ```
 
 Supported `/logs` query parameters:
@@ -67,4 +74,3 @@ Supported `/logs` query parameters:
 - `unit`: unit identifier
 - `start_utc`, `end_utc` (required): RFC3339 UTC (`Z`) timestamps
 - `limit`: integer `1..1000`
-- `order`: `asc` (default) or `desc`

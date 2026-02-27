@@ -20,6 +20,7 @@ use systemd_client::UnitProvider;
 pub struct AppState {
     pub api_token: Arc<str>,
     pub allowed_cidr: Option<IpNet>,
+    pub trusted_proxies: Arc<[IpNet]>,
     pub unit_provider: Arc<dyn UnitProvider>,
 }
 
@@ -27,11 +28,13 @@ impl AppState {
     pub fn new(
         api_token: String,
         allowed_cidr: Option<IpNet>,
+        trusted_proxies: Vec<IpNet>,
         unit_provider: Arc<dyn UnitProvider>,
     ) -> Self {
         Self {
             api_token: Arc::<str>::from(api_token),
             allowed_cidr,
+            trusted_proxies: Arc::from(trusted_proxies),
             unit_provider,
         }
     }
@@ -41,16 +44,17 @@ pub fn build_app(state: AppState) -> Router {
     let protected = Router::new()
         .route("/services", get(api::list_services))
         .route("/logs", get(api::list_logs))
+        .route("/mcp", post(api::mcp_endpoint))
+        .route("/", post(api::mcp_endpoint))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_bearer_token,
         ));
 
     Router::new()
-        .route("/", get(api::discovery).post(api::mcp_endpoint))
+        .route("/", get(api::discovery))
         .route("/health", get(api::health))
         .route("/.well-known/mcp", get(api::discovery))
-        .route("/mcp", post(api::mcp_endpoint))
         .merge(protected)
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -110,7 +114,7 @@ mod tests {
     }
 
     fn app() -> Router {
-        let state = AppState::new("token-1".to_string(), None, Arc::new(MockProvider));
+        let state = AppState::new("token-1".to_string(), None, vec![], Arc::new(MockProvider));
         build_app(state)
     }
 
@@ -118,6 +122,7 @@ mod tests {
         let state = AppState::new(
             "token-1".to_string(),
             Some(cidr.parse().expect("valid cidr")),
+            vec![],
             Arc::new(MockProvider),
         );
         build_app(state)
@@ -258,6 +263,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mcp_requires_token() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"jsonrpc":"2.0","id":1,"method":"unknown"}"#))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
     async fn mcp_unknown_method_returns_method_not_found() {
         let response = app()
             .oneshot(
@@ -265,6 +287,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1")
                     .body(Body::from(r#"{"jsonrpc":"2.0","id":1,"method":"unknown"}"#))
                     .expect("request build"),
             )
@@ -292,6 +315,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
                     ))
@@ -342,6 +366,7 @@ mod tests {
                     .uri("/")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
                     ))
@@ -373,6 +398,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1")
                     .body(Body::from("{"))
                     .expect("request build"),
             )

@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 HOST="${SMOKE_HOST:-127.0.0.1}"
 PORT="${SMOKE_PORT:-8080}"
-TOKEN="${SMOKE_TOKEN:-change-me}"
+TOKEN="${SMOKE_TOKEN:-change-me-token-16}"
 BINARY_PATH="${SMOKE_BINARY:-${ROOT_DIR}/target/release/systemd-monitoring-mcp}"
 BASE_URL="http://${HOST}:${PORT}"
 
@@ -131,10 +131,12 @@ assert_contains "$discovery_body" '"logs_endpoint":"/logs"' "discovery did not a
 echo "[smoke] checking POST /mcp initialize"
 mcp_initialize_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
   "${BASE_URL}/mcp")"
 mcp_initialize_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
   "${BASE_URL}/mcp")"
 [[ "$mcp_initialize_status" == "200" ]] || fail "/mcp initialize returned status ${mcp_initialize_status}, expected 200"
@@ -146,10 +148,12 @@ assert_contains "$mcp_initialize_body" '"logs":"/logs"' "initialize did not adve
 echo "[smoke] checking POST / initialize"
 root_initialize_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":11,"method":"initialize"}' \
   "${BASE_URL}/")"
 root_initialize_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":11,"method":"initialize"}' \
   "${BASE_URL}/")"
 [[ "$root_initialize_status" == "200" ]] || fail "/ initialize returned status ${root_initialize_status}, expected 200"
@@ -161,10 +165,12 @@ assert_contains "$root_initialize_body" '"logs":"/logs"' "root initialize did no
 echo "[smoke] checking POST /mcp ping"
 mcp_ping_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":2,"method":"ping"}' \
   "${BASE_URL}/mcp")"
 mcp_ping_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":2,"method":"ping"}' \
   "${BASE_URL}/mcp")"
 [[ "$mcp_ping_status" == "200" ]] || fail "/mcp ping returned status ${mcp_ping_status}, expected 200"
@@ -191,8 +197,8 @@ logs_unauth_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/logs"
 assert_contains "$logs_unauth_body" '"code":"missing_token"' "/logs without token body did not contain missing_token"
 
 echo "[smoke] checking GET /logs with token"
-logs_auth_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=10&order=asc")"
-logs_auth_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=10&order=asc")"
+logs_auth_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=10")"
+logs_auth_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=10")"
 [[ "$logs_auth_status" == "200" ]] || fail "/logs with token returned ${logs_auth_status}, expected 200"
 assert_contains "$logs_auth_body" '[' "/logs with token returned 200 but not a JSON array"
 

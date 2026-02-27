@@ -17,9 +17,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ensure_systemd_available().await?;
 
     let provider = Arc::new(DbusSystemdClient::new());
-    let state = AppState::new(config.api_token.clone(), config.allowed_cidr, provider);
-    let app = build_app(state);
     let bind_socket = config.bind_socket()?;
+    let state = AppState::new(
+        config.api_token.clone(),
+        config.allowed_cidr,
+        config.trusted_proxies,
+        provider,
+    );
+    let app = build_app(state);
     let listener = tokio::net::TcpListener::bind(bind_socket).await?;
 
     info!(

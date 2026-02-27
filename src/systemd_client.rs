@@ -15,12 +15,6 @@ pub struct UnitStatus {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogSortOrder {
-    Asc,
-    Desc,
-}
-
 #[derive(Debug, Clone)]
 pub struct LogQuery {
     pub priority: Option<String>,
@@ -28,7 +22,6 @@ pub struct LogQuery {
     pub start_utc: Option<DateTime<Utc>>,
     pub end_utc: Option<DateTime<Utc>>,
     pub limit: usize,
-    pub order: LogSortOrder,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -163,6 +156,8 @@ impl UnitProvider for DbusSystemdClient {
     async fn list_journal_logs(&self, query: &LogQuery) -> Result<Vec<JournalLogEntry>, AppError> {
         let mut command = Command::new("journalctl");
         command.arg("--output=json").arg("--no-pager").arg("--utc");
+        command.arg("--reverse");
+        command.arg(format!("--lines={}", query.limit));
 
         if let Some(priority) = &query.priority {
             command.arg(format!("--priority=0..{priority}"));
@@ -186,24 +181,11 @@ impl UnitProvider for DbusSystemdClient {
             .map_err(|err| AppError::internal(format!("failed to execute journalctl: {err}")))?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AppError::internal(format!(
-                "journalctl command failed: {}",
-                stderr.trim()
-            )));
+            return Err(AppError::internal("journalctl command failed"));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut entries = parse_journal_output(&stdout)?;
-
-        entries.sort_by_key(|entry| entry.timestamp_unix_usec);
-        if matches!(query.order, LogSortOrder::Desc) {
-            entries.reverse();
-        }
-
-        if entries.len() > query.limit {
-            entries.truncate(query.limit);
-        }
+        let entries = parse_journal_output(&stdout)?;
 
         Ok(entries)
     }

@@ -76,7 +76,17 @@ impl IntoResponse for AppError {
             }
             Self::Forbidden { code, message } => (StatusCode::FORBIDDEN, code, message.to_string()),
             Self::Internal { code, message } => {
-                tracing::error!(error = %message, "request failed with internal error");
+                // Log a stable error identifier without leaking raw internal details
+                // (e.g. file paths, D-Bus errors, journalctl stderr) into structured logs.
+                let error_id = {
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = DefaultHasher::new();
+                    message.hash(&mut hasher);
+                    format!("{:016x}", hasher.finish())
+                };
+                tracing::error!(error_id = %error_id, "request failed with internal error");
+                tracing::debug!(error_id = %error_id, detail = %message, "internal error detail");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     code,
