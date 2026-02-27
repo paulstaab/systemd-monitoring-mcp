@@ -16,6 +16,11 @@ pub enum AppError {
     },
     #[error("internal error")]
     Internal { code: &'static str, message: String },
+    #[error("not implemented: {message}")]
+    NotImplemented {
+        code: &'static str,
+        message: &'static str,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -36,6 +41,10 @@ impl AppError {
             message: message.into(),
         }
     }
+
+    pub fn not_implemented(code: &'static str, message: &'static str) -> Self {
+        Self::NotImplemented { code, message }
+    }
 }
 
 impl IntoResponse for AppError {
@@ -51,6 +60,9 @@ impl IntoResponse for AppError {
                     code,
                     "internal server error".to_string(),
                 )
+            }
+            Self::NotImplemented { code, message } => {
+                (StatusCode::NOT_IMPLEMENTED, code, message.to_string())
             }
         };
 

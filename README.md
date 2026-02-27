@@ -5,7 +5,7 @@ MCP server for monitoring a Linux server over HTTP.
 ## Features (MVP)
 
 - `GET /health` public health endpoint.
-- `GET /units` protected endpoint returning systemd `*.service` units.
+- `GET /services` protected endpoint returning systemd `*.service` services.
 - Bearer-token authentication using `MCP_API_TOKEN`.
 
 ## Configuration
@@ -33,23 +33,23 @@ cargo run
 curl -s http://127.0.0.1:8080/health
 ```
 
-### List units (authorized)
+### List services (authorized)
 
 ```bash
 curl -s \
 	-H "Authorization: Bearer change-me" \
-	http://127.0.0.1:8080/units
+	http://127.0.0.1:8080/services
 ```
 
-### List units (unauthorized)
+### List services (unauthorized)
 
 ```bash
-curl -i -s http://127.0.0.1:8080/units
+curl -i -s http://127.0.0.1:8080/services
 ```
 
 ## Dev container and systemd access
 
-`/units` requires a reachable system D-Bus + systemd manager.
+`/services` requires a reachable system D-Bus + systemd manager.
 
 - Default profile (`.devcontainer/devcontainer.json`): mounts host system bus socket.
 	- `source=/run/dbus/system_bus_socket`

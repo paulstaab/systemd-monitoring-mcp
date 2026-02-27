@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use axum::{middleware, routing::get, Router};
+use axum::{
+    middleware,
+    routing::{get, post},
+    Router,
+};
 
 pub mod api;
 pub mod auth;
@@ -28,7 +32,7 @@ impl AppState {
 
 pub fn build_app(state: AppState) -> Router {
     let protected = Router::new()
-        .route("/units", get(api::list_units))
+        .route("/services", get(api::list_services))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_bearer_token,
@@ -36,6 +40,8 @@ pub fn build_app(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(api::health))
+        .route("/.well-known/mcp", get(api::discovery))
+        .route("/mcp", post(api::mcp_endpoint))
         .merge(protected)
         .layer(middleware::from_fn(logging::request_logging_middleware))
         .with_state(state)
@@ -105,11 +111,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn units_require_token() {
+    async fn services_require_token() {
         let response = app()
             .oneshot(
                 Request::builder()
-                    .uri("/units")
+                    .uri("/services")
                     .method("GET")
                     .body(Body::empty())
                     .expect("request build"),
@@ -121,14 +127,130 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn units_with_token_succeeds() {
+    async fn services_with_token_succeeds() {
         let response = app()
             .oneshot(
                 Request::builder()
-                    .uri("/units")
+                    .uri("/services")
                     .method("GET")
                     .header(header::AUTHORIZATION, "Bearer token-1")
                     .body(Body::empty())
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn discovery_is_public() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/mcp")
+                    .method("GET")
+                    .body(Body::empty())
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+        assert_eq!(body_json["mcp_endpoint"], "/mcp");
+        assert_eq!(body_json["services_endpoint"], "/services");
+    }
+
+    #[tokio::test]
+    async fn mcp_unknown_method_returns_method_not_found() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"jsonrpc":"2.0","id":1,"method":"unknown"}"#))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        assert_eq!(
+            body,
+            "{\"error\":{\"code\":-32601,\"message\":\"Method not found\"},\"id\":1,\"jsonrpc\":\"2.0\"}"
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_initialize_returns_result() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 1);
+        assert_eq!(body_json["result"]["protocolVersion"], "2024-11-05");
+        assert_eq!(
+            body_json["result"]["serverInfo"]["name"],
+            env!("CARGO_PKG_NAME")
+        );
+        assert_eq!(
+            body_json["result"]["serverInfo"]["version"],
+            env!("CARGO_PKG_VERSION")
+        );
+        assert!(body_json["result"]["capabilities"]["tools"].is_object());
+        assert!(body_json["result"]["capabilities"]["resources"].is_object());
+        assert!(body_json["result"]["capabilities"]["prompts"].is_object());
+        assert_eq!(
+            body_json["result"]["metadata"]["restEndpoints"]["services"],
+            "/services"
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_parse_error_for_invalid_json() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{"))
                     .expect("request build"),
             )
             .await

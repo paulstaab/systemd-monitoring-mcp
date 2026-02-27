@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde::Serialize;
+use thiserror::Error;
 use zbus::{zvariant::OwnedObjectPath, Connection, Proxy};
 
 use crate::errors::AppError;
@@ -30,6 +31,44 @@ type ListUnitRecord = (
     String,
     OwnedObjectPath,
 );
+
+#[derive(Debug, Error)]
+pub enum SystemdAvailabilityError {
+    #[error("systemd is not running (libsystemd daemon::booted returned false)")]
+    NotBooted,
+    #[error("failed to connect to system dbus: {0}")]
+    DbusConnect(String),
+    #[error("failed to create systemd dbus proxy: {0}")]
+    ProxyCreate(String),
+    #[error("failed to query systemd manager: {0}")]
+    ManagerQuery(String),
+}
+
+pub async fn ensure_systemd_available() -> Result<(), SystemdAvailabilityError> {
+    if !libsystemd::daemon::booted() {
+        return Err(SystemdAvailabilityError::NotBooted);
+    }
+
+    let connection = Connection::system()
+        .await
+        .map_err(|err| SystemdAvailabilityError::DbusConnect(err.to_string()))?;
+
+    let proxy = Proxy::new(
+        &connection,
+        "org.freedesktop.systemd1",
+        "/org/freedesktop/systemd1",
+        "org.freedesktop.systemd1.Manager",
+    )
+    .await
+    .map_err(|err| SystemdAvailabilityError::ProxyCreate(err.to_string()))?;
+
+    let _: Vec<ListUnitRecord> = proxy
+        .call("ListUnits", &())
+        .await
+        .map_err(|err| SystemdAvailabilityError::ManagerQuery(err.to_string()))?;
+
+    Ok(())
+}
 
 #[async_trait]
 pub trait UnitProvider: Send + Sync {

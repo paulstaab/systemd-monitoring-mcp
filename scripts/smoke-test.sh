@@ -45,6 +45,10 @@ wait_for_health() {
   local max_attempts=60
 
   while (( attempts < max_attempts )); do
+    if [[ -n "$SERVER_PID" ]] && ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      fail "server process exited before becoming healthy"
+    fi
+
     if curl -sS "${BASE_URL}/health" >/dev/null 2>&1; then
       return 0
     fi
@@ -116,48 +120,51 @@ health_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/health")"
 [[ "$health_status" == "200" ]] || fail "/health returned status ${health_status}, expected 200"
 assert_contains "$health_body" '"status":"ok"' "/health body did not contain expected status"
 
-echo "[smoke] checking GET /units without token"
-units_unauth_body="$(curl -sS "${BASE_URL}/units")"
-units_unauth_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/units")"
-[[ "$units_unauth_status" == "401" ]] || fail "/units without token returned ${units_unauth_status}, expected 401"
-assert_contains "$units_unauth_body" '"code":"missing_token"' "/units without token body did not contain missing_token"
+echo "[smoke] checking GET /.well-known/mcp"
+discovery_body="$(curl -sS "${BASE_URL}/.well-known/mcp")"
+discovery_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/.well-known/mcp")"
+[[ "$discovery_status" == "200" ]] || fail "/.well-known/mcp returned status ${discovery_status}, expected 200"
+assert_contains "$discovery_body" '"mcp_endpoint":"/mcp"' "discovery did not advertise mcp endpoint"
+assert_contains "$discovery_body" '"services_endpoint":"/services"' "discovery did not advertise services endpoint"
 
-echo "[smoke] checking GET /units with token"
-units_auth_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/units")"
-units_auth_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/units")"
+echo "[smoke] checking POST /mcp initialize"
+mcp_initialize_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+  "${BASE_URL}/mcp")"
+mcp_initialize_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+  "${BASE_URL}/mcp")"
+[[ "$mcp_initialize_status" == "200" ]] || fail "/mcp initialize returned status ${mcp_initialize_status}, expected 200"
+assert_contains "$mcp_initialize_body" '"jsonrpc":"2.0"' "initialize did not return jsonrpc envelope"
+assert_contains "$mcp_initialize_body" '"protocolVersion":"2024-11-05"' "initialize did not return protocolVersion"
+assert_contains "$mcp_initialize_body" '"metadata":{"restEndpoints":{"services":"/services"}}' "initialize did not advertise services endpoint in metadata"
 
-[[ "$units_auth_status" == "200" ]] || fail "/units with token returned ${units_auth_status}, expected 200"
-assert_contains "$units_auth_body" '[' "/units with token returned 200 but not a JSON array"
+echo "[smoke] checking POST /mcp ping"
+mcp_ping_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"ping"}' \
+  "${BASE_URL}/mcp")"
+mcp_ping_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"ping"}' \
+  "${BASE_URL}/mcp")"
+[[ "$mcp_ping_status" == "200" ]] || fail "/mcp ping returned status ${mcp_ping_status}, expected 200"
+assert_contains "$mcp_ping_body" '"jsonrpc":"2.0"' "ping did not return jsonrpc envelope"
+assert_contains "$mcp_ping_body" '"result":{}' "ping did not return empty result object"
 
-echo "[smoke] running units (state=active):"
-UNITS_AUTH_BODY="$units_auth_body" python3 - <<'PY'
-import json
-import os
-import sys
+echo "[smoke] checking GET /services without token"
+services_unauth_body="$(curl -sS "${BASE_URL}/services")"
+services_unauth_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/services")"
+[[ "$services_unauth_status" == "401" ]] || fail "/services without token returned ${services_unauth_status}, expected 401"
+assert_contains "$services_unauth_body" '"code":"missing_token"' "/services without token body did not contain missing_token"
 
-body = os.environ.get("UNITS_AUTH_BODY", "")
+echo "[smoke] checking GET /services with token"
+services_auth_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/services")"
+services_auth_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/services")"
 
-try:
-  data = json.loads(body)
-except json.JSONDecodeError as exc:
-  print(f"[smoke] FAIL: could not parse /units JSON: {exc}", file=sys.stderr)
-  sys.exit(1)
-
-if not isinstance(data, list):
-  print("[smoke] FAIL: /units response is not a JSON array", file=sys.stderr)
-  sys.exit(1)
-
-running = [
-  unit.get("name")
-  for unit in data
-  if isinstance(unit, dict) and unit.get("state") == "active" and unit.get("name")
-]
-
-if not running:
-  print("[smoke] (none)")
-else:
-  for name in running:
-    print(f"[smoke] - {name}")
-PY
+[[ "$services_auth_status" == "200" ]] || fail "/services with token returned ${services_auth_status}, expected 200"
+assert_contains "$services_auth_body" '[' "/services with token returned 200 but not a JSON array"
 
 echo "[smoke] PASS"

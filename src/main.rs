@@ -1,18 +1,20 @@
 use std::sync::Arc;
 
 use systemd_monitoring_mcp::{
-    build_app, config::Config, logging, systemd_client::DbusSystemdClient, AppState,
+    build_app,
+    config::Config,
+    logging,
+    systemd_client::{ensure_systemd_available, DbusSystemdClient},
+    AppState,
 };
-use tracing::{info, warn};
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     logging::init_logging();
 
     let config = Config::from_env()?;
-    if !libsystemd::daemon::booted() {
-        warn!("systemd not detected; /units calls may fail");
-    }
+    ensure_systemd_available().await?;
 
     let provider = Arc::new(DbusSystemdClient::new());
     let state = AppState::new(config.api_token.clone(), provider);

@@ -24,6 +24,7 @@ The server must be configurable via environment variables:
 Startup behavior:
 - If `MCP_API_TOKEN` is missing or empty, server startup must fail with a clear error message.
 - If optional bind values are missing, defaults must be applied.
+- If systemd is not available on the host/runtime environment, server startup must fail with a clear error message.
 
 ## 3. API Requirements
 
@@ -40,9 +41,9 @@ Minimum response body:
 }
 ```
 
-### 3.2 Endpoint: List Units
+### 3.2 Endpoint: List Services
 - Method: `GET`
-- Path: `/units`
+- Path: `/services`
 - Authentication: required via `Authorization: Bearer <token>` header.
 
 Behavior:
@@ -73,11 +74,51 @@ Example:
 ]
 ```
 
+### 3.3 Endpoint: MCP Discovery
+- Method: `GET`
+- Path: `/.well-known/mcp`
+- Authentication: not required (public endpoint).
+
+Behavior:
+- Must return discovery metadata for this server.
+- Must advertise the MCP endpoint path.
+
+Minimum response body fields:
+- `name` (string): server name.
+- `version` (string): server version.
+- `mcp_endpoint` (string): MCP protocol endpoint path.
+- `services_endpoint` (string): REST endpoint path for service listing.
+
+### 3.4 Endpoint: MCP Protocol (Minimal JSON-RPC)
+- Method: `POST`
+- Path: `/mcp`
+- Authentication: not required for initial infrastructure scaffold.
+
+Behavior:
+- Must accept JSON-RPC 2.0 request envelopes.
+- Must return JSON-RPC 2.0 response envelopes.
+- Initial supported methods:
+	- `initialize`
+	- `ping`
+
+Method semantics:
+- `initialize`: returns MCP-style handshake metadata including:
+	- `protocolVersion` (string)
+	- `serverInfo` object with `name` and `version`
+	- `capabilities` object containing `tools`, `resources`, and `prompts` sub-objects
+	- `metadata.restEndpoints.services` with value `/services` to advertise the services endpoint to MCP clients
+- `ping`: returns an empty JSON object as result.
+
+Error handling:
+- Unknown methods must return JSON-RPC error `-32601` (Method not found).
+- Invalid request envelopes must return JSON-RPC error `-32600` (Invalid Request).
+- Invalid JSON payload must return JSON-RPC error `-32700` (Parse error).
+
 ## 4. Authentication and Security
 
 Token validation:
-- Requests to `/units` without an `Authorization` header must be rejected.
-- Requests to `/units` with a non-bearer scheme or invalid token must be rejected.
+- Requests to `/services` without an `Authorization` header must be rejected.
+- Requests to `/services` with a non-bearer scheme or invalid token must be rejected.
 
 Status codes:
 - `401 Unauthorized` for missing or invalid token.
@@ -107,7 +148,7 @@ Rules:
 
 Minimum required logs:
 - Startup logs including effective bind address/port.
-- Authentication failure logs for rejected `/units` requests.
+- Authentication failure logs for rejected `/services` requests.
 - Request summary logs (method, path, status, duration).
 
 Sensitive data handling:

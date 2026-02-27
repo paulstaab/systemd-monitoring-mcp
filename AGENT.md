@@ -7,7 +7,7 @@ a Linux server over HTTP.
 - Runtime: single Rust binary.
 - API scope (MVP):
   - `GET /health` (public)
-  - `GET /units` (requires bearer token)
+  - `GET /services` (requires bearer token)
 - Auth: static token from environment variable `MCP_API_TOKEN`.
 - Unit source: systemd via `libsystemd` + D-Bus integration.
 
@@ -27,15 +27,16 @@ a Linux server over HTTP.
 ## Requirements
 - Collect requirements in `docs/requirements.md`. 
 - When asked to implement new features or changes, execute the following steps
-  1. Update the requirements in `docs/requirements.md`
-  2. Generate a plan for implementing the changes
-  3. If running interactively, present changed requirements and implementation to the user and ask for confirmation
-     before proceeding.
+  1. If neccessary, ask the user clarifying questions.
+  2. Update the requirements in `docs/requirements.md`
+  3. Generate a plan for implementing the changes
   4. Generate test cases for the requirements in a separate artifact (not in `docs/requirements.md`).
+  5. Extend or update the smoke test script `scripts/smoke-test.sh`
   5. Implement the changes.
   6. Run tests and linters and investigate and fix any problems.
 - The MCP should only offer capabilities described in the requirements.
 - Do not include acceptance criteria or test cases in the requirements document.
+- Do not run the smoke-test script. Ask to user to do it instead.
 
 ## Build, Lint, Test
 - Fast compile check:
@@ -63,8 +64,8 @@ Recommended verification sequence before handoff:
   - `export BIND_PORT="8080"`
 - Smoke checks:
   - `curl -s http://127.0.0.1:8080/health`
-  - `curl -i -s http://127.0.0.1:8080/units`
-  - `curl -s -H "Authorization: Bearer change-me" http://127.0.0.1:8080/units`
+  - `curl -i -s http://127.0.0.1:8080/services`
+  - `curl -s -H "Authorization: Bearer change-me" http://127.0.0.1:8080/services`
 
 ## Implementation Notes
 - Keep API behavior strictly aligned with `docs/requirements.md`.
