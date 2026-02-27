@@ -94,12 +94,13 @@ Minimum response body fields:
 
 ### 3.4 Endpoint: MCP Protocol (Minimal JSON-RPC)
 - Method: `POST`
-- Path: `/mcp`
+- Path: `/mcp` (primary) and `/` (compatibility alias for MCP clients that post to root)
 - Authentication: not required for initial infrastructure scaffold.
 
 Behavior:
 - Must accept JSON-RPC 2.0 request envelopes.
 - Must return JSON-RPC 2.0 response envelopes.
+- Both `/mcp` and `/` must provide equivalent JSON-RPC behavior.
 - Initial supported methods:
 	- `initialize`
 	- `ping`

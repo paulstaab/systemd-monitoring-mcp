@@ -22,3 +22,4 @@
 
 - `GET /.well-known/mcp` includes `logs_endpoint` set to `/logs`.
 - `POST /mcp` with `initialize` includes `metadata.restEndpoints.logs` set to `/logs`.
+- `POST /` with `initialize` returns `200` and includes `metadata.restEndpoints.logs` set to `/logs`.
