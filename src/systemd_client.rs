@@ -164,6 +164,19 @@ impl UnitProvider for DbusSystemdClient {
         let mut command = Command::new("journalctl");
         command.arg("--output=json").arg("--no-pager").arg("--utc");
 
+        // Bound the output at the kernel/journald level to avoid reading unbounded data
+        // into memory. We request the limit from journalctl directly.
+        let limit = query.limit;
+        match query.order {
+            LogSortOrder::Desc => {
+                command.arg("--reverse");
+                command.arg(format!("--lines={limit}"));
+            }
+            LogSortOrder::Asc => {
+                command.arg(format!("--lines={limit}"));
+            }
+        }
+
         if let Some(priority) = &query.priority {
             command.arg(format!("--priority=0..{priority}"));
         }
@@ -186,24 +199,11 @@ impl UnitProvider for DbusSystemdClient {
             .map_err(|err| AppError::internal(format!("failed to execute journalctl: {err}")))?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AppError::internal(format!(
-                "journalctl command failed: {}",
-                stderr.trim()
-            )));
+            return Err(AppError::internal("journalctl command failed"));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut entries = parse_journal_output(&stdout)?;
-
-        entries.sort_by_key(|entry| entry.timestamp_unix_usec);
-        if matches!(query.order, LogSortOrder::Desc) {
-            entries.reverse();
-        }
-
-        if entries.len() > query.limit {
-            entries.truncate(query.limit);
-        }
+        let entries = parse_journal_output(&stdout)?;
 
         Ok(entries)
     }

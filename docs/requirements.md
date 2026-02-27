@@ -17,15 +17,18 @@ Out of scope for MVP:
 ## 2. Runtime and Configuration
 
 The server must be configurable via environment variables:
-- `MCP_API_TOKEN` (required): static bearer token used for API authentication.
+- `MCP_API_TOKEN` (required): static bearer token used for API authentication. Must be at least 16 characters long.
 - `BIND_ADDR` (optional): bind address, default `127.0.0.1`.
 - `BIND_PORT` (optional): bind port, default `8080`.
 - `MCP_ALLOWED_CIDR` (optional): CIDR range allowlist for incoming request source IPs.
+- `MCP_TRUSTED_PROXIES` (optional): comma-separated list of CIDR ranges identifying trusted reverse proxies. When set and the direct peer IP matches a trusted proxy, the client IP is extracted from the `X-Forwarded-For` header (leftmost entry).
 
 Startup behavior:
 - If `MCP_API_TOKEN` is missing or empty, server startup must fail with a clear error message.
+- If `MCP_API_TOKEN` is shorter than 16 characters, server startup must fail with a clear error message.
 - If optional bind values are missing, defaults must be applied.
 - If `MCP_ALLOWED_CIDR` is set but invalid, server startup must fail with a clear error message.
+- If `MCP_TRUSTED_PROXIES` is set but contains an invalid CIDR, server startup must fail with a clear error message.
 - If systemd is not available on the host/runtime environment, server startup must fail with a clear error message.
 
 ## 3. API Requirements
@@ -95,7 +98,7 @@ Minimum response body fields:
 ### 3.4 Endpoint: MCP Protocol (Minimal JSON-RPC)
 - Method: `POST`
 - Path: `/mcp` (primary) and `/` (compatibility alias for MCP clients that post to root)
-- Authentication: not required for initial infrastructure scaffold.
+- Authentication: required via `Authorization: Bearer <token>` header.
 
 Behavior:
 - Must accept JSON-RPC 2.0 request envelopes.
@@ -150,8 +153,10 @@ Response on success:
 ## 4. Authentication and Security
 
 Token validation:
-- Requests to `/services` without an `Authorization` header must be rejected.
-- Requests to `/services` with a non-bearer scheme or invalid token must be rejected.
+- Bearer token comparison must use a constant-time algorithm (HMAC-based) to prevent timing side-channel attacks.
+- `MCP_API_TOKEN` must be at least 16 characters; shorter values must be rejected at startup.
+- Requests to protected endpoints (`/services`, `/logs`, `POST /mcp`, `POST /`) without an `Authorization` header must be rejected.
+- Requests to protected endpoints with a non-bearer scheme or invalid token must be rejected.
 
 Status codes:
 - `401 Unauthorized` for missing or invalid token.
@@ -166,7 +171,12 @@ Input Validation:
 Request source IP allowlist:
 - If `MCP_ALLOWED_CIDR` is not set, no source-IP filtering is applied.
 - If `MCP_ALLOWED_CIDR` is set, requests from source IPs outside the range must be rejected.
+- When `MCP_TRUSTED_PROXIES` is configured and the direct peer IP matches a trusted proxy CIDR, the client IP must be extracted from the leftmost entry of the `X-Forwarded-For` header.
+- If the direct peer is not a trusted proxy, `X-Forwarded-For` must be ignored and the socket-level peer IP is used.
 - Rejected requests must return `403 Forbidden` with the standard JSON error shape.
+
+Journal log queries:
+- The `journalctl` subprocess must be invoked with `--lines=<limit>` to bound output at the source and prevent unbounded memory usage.
 
 ## 5. Error Response Format
 
@@ -195,3 +205,4 @@ Minimum required logs:
 Sensitive data handling:
 - Never log `MCP_API_TOKEN` value.
 - Never log bearer token values from requests.
+- Internal error details (file paths, D-Bus errors, journalctl stderr) must not be logged at production log levels (`error` and above). An opaque error identifier must be logged at `error` level; full details may only be logged at `debug` level.
