@@ -54,13 +54,8 @@ curl -s \
 
 Supported `/logs` query parameters:
 - `priority`: `0..7` or aliases (`emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`)
-- `unit`: unit identifier containing only ASCII letters/digits, dashes (`-`), underscores (`_`), at-sign (`@`), and colon (`:`)
+- `unit`: unit identifier
 - `start_utc`, `end_utc` (required): RFC3339 UTC (`Z`) timestamps
 - `limit`: integer `1..1000`
 - `order`: `asc` (default) or `desc`
 
-### List services (unauthorized)
-
-```bash
-curl -i -s http://127.0.0.1:8080/services
-```
