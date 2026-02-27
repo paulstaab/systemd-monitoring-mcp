@@ -131,10 +131,12 @@ assert_contains "$discovery_body" '"logs_endpoint":"/logs"' "discovery did not a
 echo "[smoke] checking POST /mcp initialize"
 mcp_initialize_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
   "${BASE_URL}/mcp")"
 mcp_initialize_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
   "${BASE_URL}/mcp")"
 [[ "$mcp_initialize_status" == "200" ]] || fail "/mcp initialize returned status ${mcp_initialize_status}, expected 200"
@@ -146,10 +148,12 @@ assert_contains "$mcp_initialize_body" '"logs":"/logs"' "initialize did not adve
 echo "[smoke] checking POST / initialize"
 root_initialize_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":11,"method":"initialize"}' \
   "${BASE_URL}/")"
 root_initialize_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":11,"method":"initialize"}' \
   "${BASE_URL}/")"
 [[ "$root_initialize_status" == "200" ]] || fail "/ initialize returned status ${root_initialize_status}, expected 200"
@@ -161,10 +165,12 @@ assert_contains "$root_initialize_body" '"logs":"/logs"' "root initialize did no
 echo "[smoke] checking POST /mcp ping"
 mcp_ping_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":2,"method":"ping"}' \
   "${BASE_URL}/mcp")"
 mcp_ping_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":2,"method":"ping"}' \
   "${BASE_URL}/mcp")"
 [[ "$mcp_ping_status" == "200" ]] || fail "/mcp ping returned status ${mcp_ping_status}, expected 200"

@@ -95,18 +95,33 @@ fn extract_client_ip(state: &AppState, request: &Request) -> Result<IpAddr, AppE
         .any(|cidr| cidr.contains(&peer_ip));
 
     if peer_is_trusted {
-        if let Some(forwarded_for) = request
+        let forwarded_for = request
             .headers()
             .get("x-forwarded-for")
             .and_then(|v| v.to_str().ok())
-        {
-            // X-Forwarded-For is a comma-separated list; the left-most entry is the original client.
-            if let Some(first) = forwarded_for.split(',').next() {
-                if let Ok(ip) = first.trim().parse::<IpAddr>() {
-                    return Ok(ip);
-                }
-            }
-        }
+            .ok_or_else(|| {
+                AppError::forbidden(
+                    "ip_restricted",
+                    "x-forwarded-for is required when request comes from a trusted proxy",
+                )
+            })?;
+
+        // X-Forwarded-For is a comma-separated list; the left-most entry is the original client.
+        let first = forwarded_for.split(',').next().ok_or_else(|| {
+            AppError::forbidden(
+                "ip_restricted",
+                "x-forwarded-for is required when request comes from a trusted proxy",
+            )
+        })?;
+
+        let forwarded_ip = first.trim().parse::<IpAddr>().map_err(|_| {
+            AppError::forbidden(
+                "ip_restricted",
+                "x-forwarded-for contains an invalid client IP",
+            )
+        })?;
+
+        return Ok(forwarded_ip);
     }
 
     Ok(peer_ip)
@@ -127,7 +142,7 @@ mod tests {
         http::{header, Request},
     };
 
-    use crate::{systemd_client::DbusSystemdClient, AppState};
+    use crate::{errors::AppError, systemd_client::DbusSystemdClient, AppState};
 
     use super::{extract_client_ip, parse_bearer_token, tokens_match};
 
@@ -210,28 +225,34 @@ mod tests {
     }
 
     #[test]
-    fn trusted_peer_with_missing_xff_uses_peer_ip() {
+    fn trusted_peer_with_missing_xff_is_rejected() {
         let state = state_with_trusted_proxies(&["10.0.0.0/8"]);
         let request = request_with_peer_and_optional_xff([10, 10, 10, 10], None);
 
-        let client_ip = extract_client_ip(&state, &request).expect("client ip extraction");
+        let error = extract_client_ip(&state, &request).expect_err("expected forbidden error");
 
-        assert_eq!(
-            client_ip,
-            "10.10.10.10".parse::<std::net::IpAddr>().expect("valid ip")
-        );
+        assert!(matches!(
+            error,
+            AppError::Forbidden {
+                code: "ip_restricted",
+                ..
+            }
+        ));
     }
 
     #[test]
-    fn trusted_peer_with_invalid_xff_uses_peer_ip() {
+    fn trusted_peer_with_invalid_xff_is_rejected() {
         let state = state_with_trusted_proxies(&["10.0.0.0/8"]);
         let request = request_with_peer_and_optional_xff([10, 10, 10, 10], Some("not-an-ip"));
 
-        let client_ip = extract_client_ip(&state, &request).expect("client ip extraction");
+        let error = extract_client_ip(&state, &request).expect_err("expected forbidden error");
 
-        assert_eq!(
-            client_ip,
-            "10.10.10.10".parse::<std::net::IpAddr>().expect("valid ip")
-        );
+        assert!(matches!(
+            error,
+            AppError::Forbidden {
+                code: "ip_restricted",
+                ..
+            }
+        ));
     }
 }

@@ -170,6 +170,7 @@ Request source IP allowlist:
 - If `MCP_ALLOWED_CIDR` is not set, no source-IP filtering is applied.
 - If `MCP_ALLOWED_CIDR` is set, requests from source IPs outside the range must be rejected.
 - When `MCP_TRUSTED_PROXIES` is configured and the direct peer IP matches a trusted proxy CIDR, the client IP must be extracted from the leftmost entry of the `X-Forwarded-For` header.
+- If the direct peer is a trusted proxy but `X-Forwarded-For` is missing or contains an invalid client IP, the request must be rejected with `403 Forbidden`.
 - If the direct peer is not a trusted proxy, `X-Forwarded-For` must be ignored and the socket-level peer IP is used.
 - Rejected requests must return `403 Forbidden` with the standard JSON error shape.
 
