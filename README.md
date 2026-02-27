@@ -1,14 +1,14 @@
 # systemd-monitoring-mcp
 
-MCP server for monitoring a Linux server over HTTP.
+MCP server for monitoring a Linux server over JSON-RPC.
 
 ## Features (MVP)
 
 - `GET /health` public health endpoint.
-- `GET /` and `GET /.well-known/mcp` public MCP discovery endpoints.
-- `POST /` and `POST /mcp` MCP JSON-RPC endpoints (bearer-token protected).
-- `GET /services` protected endpoint returning systemd `*.service` services.
-- `GET /logs` protected endpoint returning journald logs with filter/limit options.
+- `GET /.well-known/mcp` public MCP discovery endpoint.
+- `POST /mcp` MCP JSON-RPC endpoint (bearer-token protected).
+- MCP tools: `list_services`, `list_logs`.
+- MCP resources: `resource://services/snapshot`, `resource://logs/recent`.
 - Bearer-token authentication using `MCP_API_TOKEN` (constant-time HMAC comparison).
 - Optional CIDR-based IP allowlist with trusted-proxy support (`X-Forwarded-For`).
 
@@ -43,34 +43,52 @@ cargo run
 curl -s http://127.0.0.1:8080/health
 ```
 
-### MCP initialize (Copilot-compatible root path)
+### MCP initialize
 
 ```bash
 curl -s \
 	-H "Content-Type: application/json" \
 	-H "Authorization: Bearer $MCP_API_TOKEN" \
-	-d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
-	http://127.0.0.1:8080/
+	-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"example-client","version":"1.0.0"},"capabilities":{}}}' \
+	http://127.0.0.1:8080/mcp
 ```
 
-### List services (authorized)
+### MCP tools/list
 
 ```bash
 curl -s \
+	-H "Content-Type: application/json" \
 	-H "Authorization: Bearer $MCP_API_TOKEN" \
-	http://127.0.0.1:8080/services
+	-d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+	http://127.0.0.1:8080/mcp
 ```
 
-### List logs (authorized)
+### MCP tools/call list_services
 
 ```bash
 curl -s \
+	-H "Content-Type: application/json" \
 	-H "Authorization: Bearer $MCP_API_TOKEN" \
-	"http://127.0.0.1:8080/logs?priority=err&unit=sshd_service&start_utc=2026-02-27T00:00:00Z&end_utc=2026-02-27T01:00:00Z&limit=100"
+	-d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_services","arguments":{}}}' \
+	http://127.0.0.1:8080/mcp
 ```
 
-Supported `/logs` query parameters:
-- `priority`: minimum severity threshold (`0` to `7` or aliases like `err`); returns that priority and higher-severity entries
-- `unit`: unit identifier
-- `start_utc`, `end_utc` (required): RFC3339 UTC (`Z`) timestamps
-- `limit`: integer `1..1000`
+### MCP tools/call list_logs
+
+```bash
+curl -s \
+	-H "Content-Type: application/json" \
+	-H "Authorization: Bearer $MCP_API_TOKEN" \
+	-d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_logs","arguments":{"priority":"err","unit":"sshd_service","start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","limit":100}}}' \
+	http://127.0.0.1:8080/mcp
+```
+
+## Verification
+
+Use this sequence before handoff or release:
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
