@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1"
 axum = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 ipnet = "2"
 libsystemd = "0.7"
 serde = { version = "1", features = ["derive"] }

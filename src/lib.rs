@@ -40,6 +40,7 @@ impl AppState {
 pub fn build_app(state: AppState) -> Router {
     let protected = Router::new()
         .route("/services", get(api::list_services))
+        .route("/logs", get(api::list_logs))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_bearer_token,
@@ -70,7 +71,7 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    use crate::systemd_client::{UnitProvider, UnitStatus};
+    use crate::systemd_client::{JournalLogEntry, LogQuery, UnitProvider, UnitStatus};
 
     use super::*;
 
@@ -91,6 +92,19 @@ mod tests {
                     description: Some("A service".to_string()),
                 },
             ])
+        }
+
+        async fn list_journal_logs(
+            &self,
+            _query: &LogQuery,
+        ) -> Result<Vec<JournalLogEntry>, crate::errors::AppError> {
+            Ok(vec![JournalLogEntry {
+                timestamp_utc: "2026-02-27T00:00:00.000Z".to_string(),
+                timestamp_unix_usec: 1_772_150_400_000_000,
+                unit: Some("ssh.service".to_string()),
+                priority: Some(6),
+                message: Some("Started OpenSSH server".to_string()),
+            }])
         }
     }
 
@@ -148,6 +162,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn logs_require_token() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/logs")
+                    .method("GET")
+                    .body(Body::empty())
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn logs_with_token_succeeds() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri(
+                        "/logs?start_utc=2026-02-27T00:00:00Z&end_utc=2026-02-27T01:00:00Z&limit=1",
+                    )
+                    .method("GET")
+                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .body(Body::empty())
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn services_with_token_succeeds() {
         let response = app()
             .oneshot(
@@ -188,6 +237,7 @@ mod tests {
             serde_json::from_slice(&body).expect("valid json response");
         assert_eq!(body_json["mcp_endpoint"], "/mcp");
         assert_eq!(body_json["services_endpoint"], "/services");
+        assert_eq!(body_json["logs_endpoint"], "/logs");
     }
 
     #[tokio::test]
@@ -260,6 +310,10 @@ mod tests {
         assert_eq!(
             body_json["result"]["metadata"]["restEndpoints"]["services"],
             "/services"
+        );
+        assert_eq!(
+            body_json["result"]["metadata"]["restEndpoints"]["logs"],
+            "/logs"
         );
     }
 
