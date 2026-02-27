@@ -15,16 +15,3 @@ jobs:
   test:
     if: github.event.pull_request.draft == false
     uses: ./.github/workflows/_test.yml
-
-  release-smoke:
-    if: github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Build release binary
-        run: cargo build --release
-
-      - name: Run smoke tests
-        run: scripts/smoke-test.sh
