@@ -14,6 +14,11 @@ pub enum AppError {
         code: &'static str,
         message: &'static str,
     },
+    #[error("forbidden: {message}")]
+    Forbidden {
+        code: &'static str,
+        message: &'static str,
+    },
     #[error("internal error")]
     Internal { code: &'static str, message: String },
     #[error("not implemented: {message}")]
@@ -35,6 +40,10 @@ impl AppError {
         Self::Unauthorized { code, message }
     }
 
+    pub fn forbidden(code: &'static str, message: &'static str) -> Self {
+        Self::Forbidden { code, message }
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self::Internal {
             code: "internal_error",
@@ -53,6 +62,7 @@ impl IntoResponse for AppError {
             Self::Unauthorized { code, message } => {
                 (StatusCode::UNAUTHORIZED, code, message.to_string())
             }
+            Self::Forbidden { code, message } => (StatusCode::FORBIDDEN, code, message.to_string()),
             Self::Internal { code, message } => {
                 tracing::error!(error = %message, "request failed with internal error");
                 (

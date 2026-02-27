@@ -13,6 +13,7 @@ MCP server for monitoring a Linux server over HTTP.
 - `MCP_API_TOKEN` (required): static API token.
 - `BIND_ADDR` (optional, default: `0.0.0.0`)
 - `BIND_PORT` (optional, default: `8080`)
+- `MCP_ALLOWED_CIDR` (optional): if set, only requests originating from this CIDR range are accepted.
 
 ## Run
 
@@ -21,6 +22,7 @@ export MCP_API_TOKEN="change-me"
 # optional:
 # export BIND_ADDR="0.0.0.0"
 # export BIND_PORT="8080"
+# export MCP_ALLOWED_CIDR="10.0.0.0/8"
 
 cargo run
 ```
@@ -46,15 +48,3 @@ curl -s \
 ```bash
 curl -i -s http://127.0.0.1:8080/services
 ```
-
-## Dev container and systemd access
-
-`/services` requires a reachable system D-Bus + systemd manager.
-
-- Default profile (`.devcontainer/devcontainer.json`): mounts host system bus socket.
-	- `source=/run/dbus/system_bus_socket`
-	- sets `DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket`
-- Optional full-systemd profile: `.devcontainer/devcontainer.systemd.json`
-	- Uses privileged container settings and cgroup mounts for systemd-as-PID1.
-
-After switching profile settings, rebuild the dev container before testing.
