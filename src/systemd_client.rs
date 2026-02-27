@@ -295,9 +295,10 @@ fn read_journal_field(
         return Ok(None);
     };
 
-    Ok(std::str::from_utf8(value)
-        .ok()
-        .map(std::string::ToString::to_string))
+    // Use a lossy UTF-8 conversion so non-UTF8 bytes don't cause the field
+    // to be dropped. This preserves the presence of the field while replacing
+    // invalid sequences with the Unicode replacement character.
+    Ok(Some(String::from_utf8_lossy(value).into_owned()))
 }
 
 #[cfg(test)]
