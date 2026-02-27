@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use systemd_monitoring_mcp::{
-    AppState, build_app, config::Config, logging, systemd_client::DbusSystemdClient,
+    build_app, config::Config, logging, systemd_client::DbusSystemdClient, AppState,
 };
 use tracing::{info, warn};
 

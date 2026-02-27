@@ -1,7 +1,7 @@
-use axum::{Json, extract::State};
+use axum::{extract::State, Json};
 use serde::Serialize;
 
-use crate::{AppState, errors::AppError, systemd_client::UnitStatus};
+use crate::{errors::AppError, systemd_client::UnitStatus, AppState};
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {

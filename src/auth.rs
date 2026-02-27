@@ -5,7 +5,7 @@ use axum::{
     response::Response,
 };
 
-use crate::{AppState, errors::AppError};
+use crate::{errors::AppError, AppState};
 
 pub async fn require_bearer_token(
     State(state): State<AppState>,

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde::Serialize;
-use zbus::{Connection, Proxy, zvariant::OwnedObjectPath};
+use zbus::{zvariant::OwnedObjectPath, Connection, Proxy};
 
 use crate::errors::AppError;
 
@@ -114,7 +114,7 @@ fn map_and_sort_service_units(raw_units: Vec<RawUnit>) -> Vec<UnitStatus> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RawUnit, map_and_sort_service_units};
+    use super::{map_and_sort_service_units, RawUnit};
 
     #[test]
     fn filters_non_service_and_sorts() {

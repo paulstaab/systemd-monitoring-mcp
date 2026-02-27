@@ -57,12 +57,9 @@ mod tests {
 
     #[test]
     fn parse_defaults() {
-        // Safety: tests run in a controlled process context.
-        unsafe {
-            env::set_var("MCP_API_TOKEN", "abc");
-            env::remove_var("BIND_ADDR");
-            env::remove_var("BIND_PORT");
-        }
+        env::set_var("MCP_API_TOKEN", "abc");
+        env::remove_var("BIND_ADDR");
+        env::remove_var("BIND_PORT");
 
         let config = Config::from_env().expect("config should parse");
         assert_eq!(config.bind_addr, "0.0.0.0");
@@ -71,9 +68,7 @@ mod tests {
 
     #[test]
     fn missing_token_fails() {
-        unsafe {
-            env::remove_var("MCP_API_TOKEN");
-        }
+        env::remove_var("MCP_API_TOKEN");
 
         let err = Config::from_env().expect_err("expected missing token error");
         assert!(matches!(err, ConfigError::MissingApiToken));

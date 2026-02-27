@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::{Router, middleware, routing::get};
+use axum::{middleware, routing::get, Router};
 
 pub mod api;
 pub mod auth;
@@ -47,7 +47,7 @@ mod tests {
 
     use axum::{
         body::Body,
-        http::{Request, StatusCode, header},
+        http::{header, Request, StatusCode},
     };
     use http_body_util::BodyExt;
     use tower::ServiceExt;
