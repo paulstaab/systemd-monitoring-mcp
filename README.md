@@ -64,13 +64,7 @@ curl -s \
 
 Supported `/logs` query parameters:
 - `priority`: minimum severity threshold (`0` to `7` or aliases like `err`); returns that priority and higher-severity entries
-- `unit`: unit identifier containing only ASCII letters/digits, dashes (`-`), underscores (`_`), at-sign (`@`), and colon (`:`)
+- `unit`: unit identifier
 - `start_utc`, `end_utc` (required): RFC3339 UTC (`Z`) timestamps
 - `limit`: integer `1..1000`
 - `order`: `asc` (default) or `desc`
-
-### List services (unauthorized)
-
-```bash
-curl -i -s http://127.0.0.1:8080/services
-```
