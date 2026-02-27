@@ -6,12 +6,12 @@ Implement an MCP server that exposes a REST API for monitoring systemd units.
 
 MVP scope is limited to:
 - Listing systemd service units and their current state.
+- Reading journald logs with optional filtering and ordering.
 - Exposing the server over HTTP.
 - Restricting access using a static token configured via environment variable.
 
 Out of scope for MVP:
 - Starting, stopping, restarting, or modifying units.
-- Pagination, filtering, or search.
 - Non-service unit types (sockets, timers, mounts, etc.).
 
 ## 2. Runtime and Configuration
@@ -88,6 +88,7 @@ Minimum response body fields:
 - `version` (string): server version.
 - `mcp_endpoint` (string): MCP protocol endpoint path.
 - `services_endpoint` (string): REST endpoint path for service listing.
+- `logs_endpoint` (string): REST endpoint path for journald log listing.
 
 ### 3.4 Endpoint: MCP Protocol (Minimal JSON-RPC)
 - Method: `POST`
@@ -107,12 +108,41 @@ Method semantics:
 	- `serverInfo` object with `name` and `version`
 	- `capabilities` object containing `tools`, `resources`, and `prompts` sub-objects
 	- `metadata.restEndpoints.services` with value `/services` to advertise the services endpoint to MCP clients
+	- `metadata.restEndpoints.logs` with value `/logs` to advertise the logs endpoint to MCP clients
 - `ping`: returns an empty JSON object as result.
 
 Error handling:
 - Unknown methods must return JSON-RPC error `-32601` (Method not found).
 - Invalid request envelopes must return JSON-RPC error `-32600` (Invalid Request).
 - Invalid JSON payload must return JSON-RPC error `-32700` (Parse error).
+
+### 3.5 Endpoint: List Logs
+- Method: `GET`
+- Path: `/logs`
+- Authentication: required via `Authorization: Bearer <token>` header.
+
+Behavior:
+- Must return journald log entries in a single response.
+- Must always sort logs by timestamp.
+- Default sort order is ascending (`asc`) by timestamp.
+- Optional query parameter `order` supports `asc` or `desc`.
+- Optional query parameter `priority` filters by systemd/journald priority (`0..7`) or common aliases (`emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`).
+- Optional query parameter `unit` filters by systemd unit identifier.
+- `unit` must use strict parameter validation and contain only ASCII alphanumeric characters, dashes (`-`), underscores (`_`), at-sign (`@`), and colon (`:`).
+- Required query parameters `start_utc` and `end_utc` filter by inclusive UTC timerange.
+- Timerange values must be RFC3339 UTC timestamps (`Z` suffix).
+- Optional query parameter `limit` caps number of returned entries.
+- `limit` must be `>= 1` and `<= 1000`.
+- If `limit` is omitted, a default limit is applied by the server.
+
+Response on success:
+- HTTP `200`
+- JSON array where each item contains:
+	- `timestamp_utc` (string): UTC timestamp (RFC3339 format).
+	- `timestamp_unix_usec` (number): journal realtime timestamp in microseconds.
+	- `unit` (string or null): `_SYSTEMD_UNIT` when available.
+	- `priority` (number or null): journal priority when available.
+	- `message` (string or null): log message when available.
 
 ## 4. Authentication and Security
 
@@ -126,6 +156,9 @@ Status codes:
 
 CORS:
 - CORS must not be enabled in MVP (server-to-server usage only).
+
+Input Validation:
+- All API parameters must be strictly validated.
 
 ## 5. Error Response Format
 
