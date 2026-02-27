@@ -18,7 +18,7 @@ Out of scope for MVP:
 
 The server must be configurable via environment variables:
 - `MCP_API_TOKEN` (required): static bearer token used for API authentication.
-- `BIND_ADDR` (optional): bind address, default `0.0.0.0`.
+- `BIND_ADDR` (optional): bind address, default `127.0.0.1`.
 - `BIND_PORT` (optional): bind port, default `8080`.
 - `MCP_ALLOWED_CIDR` (optional): CIDR range allowlist for incoming request source IPs.
 
