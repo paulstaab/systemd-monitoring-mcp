@@ -1,6 +1,6 @@
 [package]
 name = "systemd-monitoring-mcp"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 
 [dependencies]
@@ -13,6 +13,7 @@ systemd = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+rust-mcp-sdk = { version = "0.8.3", default-features = false, features = ["server", "macros"] }
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 tracing = "0.1"

@@ -125,42 +125,59 @@ discovery_body="$(curl -sS "${BASE_URL}/.well-known/mcp")"
 discovery_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/.well-known/mcp")"
 [[ "$discovery_status" == "200" ]] || fail "/.well-known/mcp returned status ${discovery_status}, expected 200"
 assert_contains "$discovery_body" '"mcp_endpoint":"/mcp"' "discovery did not advertise mcp endpoint"
-assert_contains "$discovery_body" '"services_endpoint":"/services"' "discovery did not advertise services endpoint"
-assert_contains "$discovery_body" '"logs_endpoint":"/logs"' "discovery did not advertise logs endpoint"
 
 echo "[smoke] checking POST /mcp initialize"
 mcp_initialize_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"smoke-client","version":"1.0.0"},"capabilities":{}}}' \
   "${BASE_URL}/mcp")"
 mcp_initialize_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"smoke-client","version":"1.0.0"},"capabilities":{}}}' \
   "${BASE_URL}/mcp")"
 [[ "$mcp_initialize_status" == "200" ]] || fail "/mcp initialize returned status ${mcp_initialize_status}, expected 200"
 assert_contains "$mcp_initialize_body" '"jsonrpc":"2.0"' "initialize did not return jsonrpc envelope"
 assert_contains "$mcp_initialize_body" '"protocolVersion":"2024-11-05"' "initialize did not return protocolVersion"
-assert_contains "$mcp_initialize_body" '"services":"/services"' "initialize did not advertise services endpoint in metadata"
-assert_contains "$mcp_initialize_body" '"logs":"/logs"' "initialize did not advertise logs endpoint in metadata"
 
-echo "[smoke] checking POST / initialize"
-root_initialize_body="$(curl -sS -X POST \
+echo "[smoke] checking POST / is not an MCP endpoint"
+root_post_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":11,"method":"initialize"}' \
   "${BASE_URL}/")"
-root_initialize_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+[[ "$root_post_status" == "404" || "$root_post_status" == "405" ]] || fail "/ returned status ${root_post_status}, expected 404 or 405"
+
+echo "[smoke] checking POST /mcp tools/list"
+tools_list_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"jsonrpc":"2.0","id":11,"method":"initialize"}' \
-  "${BASE_URL}/")"
-[[ "$root_initialize_status" == "200" ]] || fail "/ initialize returned status ${root_initialize_status}, expected 200"
-assert_contains "$root_initialize_body" '"jsonrpc":"2.0"' "root initialize did not return jsonrpc envelope"
-assert_contains "$root_initialize_body" '"protocolVersion":"2024-11-05"' "root initialize did not return protocolVersion"
-assert_contains "$root_initialize_body" '"services":"/services"' "root initialize did not advertise services endpoint in metadata"
-assert_contains "$root_initialize_body" '"logs":"/logs"' "root initialize did not advertise logs endpoint in metadata"
+  -d '{"jsonrpc":"2.0","id":12,"method":"tools/list","params":{}}' \
+  "${BASE_URL}/mcp")"
+tools_list_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":12,"method":"tools/list","params":{}}' \
+  "${BASE_URL}/mcp")"
+[[ "$tools_list_status" == "200" ]] || fail "/mcp tools/list returned status ${tools_list_status}, expected 200"
+assert_contains "$tools_list_body" '"list_services"' "tools/list did not include list_services"
+assert_contains "$tools_list_body" '"list_logs"' "tools/list did not include list_logs"
+
+echo "[smoke] checking POST /mcp resources/list"
+resources_list_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":13,"method":"resources/list","params":{}}' \
+  "${BASE_URL}/mcp")"
+resources_list_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":13,"method":"resources/list","params":{}}' \
+  "${BASE_URL}/mcp")"
+[[ "$resources_list_status" == "200" ]] || fail "/mcp resources/list returned status ${resources_list_status}, expected 200"
+assert_contains "$resources_list_body" '"resource://services/snapshot"' "resources/list missing service snapshot URI"
+assert_contains "$resources_list_body" '"resource://logs/recent"' "resources/list missing logs snapshot URI"
 
 echo "[smoke] checking POST /mcp ping"
 mcp_ping_body="$(curl -sS -X POST \
@@ -177,36 +194,13 @@ mcp_ping_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
 assert_contains "$mcp_ping_body" '"jsonrpc":"2.0"' "ping did not return jsonrpc envelope"
 assert_contains "$mcp_ping_body" '"result":{}' "ping did not return empty result object"
 
-echo "[smoke] checking GET /services without token"
-services_unauth_body="$(curl -sS "${BASE_URL}/services")"
-services_unauth_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/services")"
-[[ "$services_unauth_status" == "401" ]] || fail "/services without token returned ${services_unauth_status}, expected 401"
-assert_contains "$services_unauth_body" '"code":"missing_token"' "/services without token body did not contain missing_token"
+echo "[smoke] checking GET /services is removed"
+services_route_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/services")"
+[[ "$services_route_status" == "404" ]] || fail "/services returned ${services_route_status}, expected 404"
 
-echo "[smoke] checking GET /services with invalid token"
-services_invalid_token_body="$(curl -sS -H "Authorization: Bearer invalid-token" "${BASE_URL}/services")"
-services_invalid_token_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer invalid-token" "${BASE_URL}/services")"
-[[ "$services_invalid_token_status" == "401" ]] || fail "/services with invalid token returned ${services_invalid_token_status}, expected 401"
-assert_contains "$services_invalid_token_body" '"code":"invalid_token"' "/services with invalid token body did not contain invalid_token"
-
-echo "[smoke] checking GET /services with token"
-services_auth_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/services")"
-services_auth_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/services")"
-
-[[ "$services_auth_status" == "200" ]] || fail "/services with token returned ${services_auth_status}, expected 200"
-assert_contains "$services_auth_body" '[' "/services with token returned 200 but not a JSON array"
-
-echo "[smoke] checking GET /logs without token"
-logs_unauth_body="$(curl -sS "${BASE_URL}/logs")"
-logs_unauth_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/logs")"
-[[ "$logs_unauth_status" == "401" ]] || fail "/logs without token returned ${logs_unauth_status}, expected 401"
-assert_contains "$logs_unauth_body" '"code":"missing_token"' "/logs without token body did not contain missing_token"
-
-echo "[smoke] checking GET /logs with invalid token"
-logs_invalid_token_body="$(curl -sS -H "Authorization: Bearer invalid-token" "${BASE_URL}/logs")"
-logs_invalid_token_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer invalid-token" "${BASE_URL}/logs")"
-[[ "$logs_invalid_token_status" == "401" ]] || fail "/logs with invalid token returned ${logs_invalid_token_status}, expected 401"
-assert_contains "$logs_invalid_token_body" '"code":"invalid_token"' "/logs with invalid token body did not contain invalid_token"
+echo "[smoke] checking GET /logs is removed"
+logs_route_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/logs")"
+[[ "$logs_route_status" == "404" ]] || fail "/logs returned ${logs_route_status}, expected 404"
 
 echo "[smoke] checking POST /mcp ping with invalid token"
 mcp_ping_invalid_token_body="$(curl -sS -X POST \
@@ -222,16 +216,33 @@ mcp_ping_invalid_token_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST
 [[ "$mcp_ping_invalid_token_status" == "401" ]] || fail "/mcp ping with invalid token returned ${mcp_ping_invalid_token_status}, expected 401"
 assert_contains "$mcp_ping_invalid_token_body" '"code":"invalid_token"' "/mcp ping with invalid token body did not contain invalid_token"
 
-echo "[smoke] checking GET /logs with token"
-logs_auth_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=10")"
-logs_auth_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=10")"
-[[ "$logs_auth_status" == "200" ]] || fail "/logs with token returned ${logs_auth_status}, expected 200"
-assert_contains "$logs_auth_body" '[' "/logs with token returned 200 but not a JSON array"
+echo "[smoke] checking POST /mcp tools/call list_logs"
+list_logs_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"2100-01-01T00:00:00Z","limit":10}}}' \
+  "${BASE_URL}/mcp")"
+list_logs_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"2100-01-01T00:00:00Z","limit":10}}}' \
+  "${BASE_URL}/mcp")"
+[[ "$list_logs_status" == "200" ]] || fail "tools/call list_logs returned ${list_logs_status}, expected 200"
+assert_contains "$list_logs_body" '"structuredContent"' "tools/call list_logs did not return structuredContent"
 
-echo "[smoke] checking GET /logs invalid limit"
-logs_invalid_limit_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=1001")"
-logs_invalid_limit_status="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/logs?start_utc=1970-01-01T00:00:00Z&end_utc=2100-01-01T00:00:00Z&limit=1001")"
-[[ "$logs_invalid_limit_status" == "400" ]] || fail "/logs with invalid limit returned ${logs_invalid_limit_status}, expected 400"
-assert_contains "$logs_invalid_limit_body" '"code":"invalid_limit"' "/logs invalid limit body did not contain invalid_limit"
+echo "[smoke] checking POST /mcp tools/call list_logs invalid limit"
+list_logs_invalid_limit_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"2100-01-01T00:00:00Z","limit":1001}}}' \
+  "${BASE_URL}/mcp")"
+list_logs_invalid_limit_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"2100-01-01T00:00:00Z","limit":1001}}}' \
+  "${BASE_URL}/mcp")"
+[[ "$list_logs_invalid_limit_status" == "200" ]] || fail "tools/call list_logs invalid limit returned ${list_logs_invalid_limit_status}, expected 200"
+assert_contains "$list_logs_invalid_limit_body" '"code":-32602' "tools/call list_logs invalid limit did not return invalid params error"
+assert_contains "$list_logs_invalid_limit_body" '"invalid_limit"' "tools/call list_logs invalid limit did not include invalid_limit code"
 
 echo "[smoke] PASS"

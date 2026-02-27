@@ -1,13 +1,27 @@
-use axum::{body::Bytes, extract::Query, extract::State, Json};
-use chrono::{DateTime, Utc};
+use axum::{
+    body::Bytes,
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use chrono::{DateTime, Duration, Utc};
+use rust_mcp_sdk::{
+    macros,
+    schema::{
+        CallToolRequest, CallToolRequestParams, CallToolResult, ContentBlock, Implementation,
+        InitializeRequest, InitializeResult, JsonrpcErrorResponse, JsonrpcMessage, JsonrpcRequest,
+        JsonrpcResultResponse, ListResourcesRequest, ListResourcesResult, ListToolsRequest,
+        ListToolsResult, PingRequest, ProtocolVersion, ReadResourceContent, ReadResourceRequest,
+        ReadResourceRequestParams, ReadResourceResult, RequestId, Resource, Result as McpResult,
+        RpcError, ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesResources,
+        ServerCapabilitiesTools, TextContent, TextResourceContents, Tool,
+    },
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::{
-    errors::AppError,
-    systemd_client::{JournalLogEntry, LogQuery, UnitStatus},
-    AppState,
-};
+use crate::{errors::AppError, systemd_client::LogQuery, AppState};
 
 const MAX_LOG_LIMIT: usize = 1_000;
 const DEFAULT_LOG_LIMIT: usize = 100;
@@ -31,16 +45,29 @@ pub struct DiscoveryResponse {
     pub name: &'static str,
     pub version: &'static str,
     pub mcp_endpoint: &'static str,
-    pub services_endpoint: &'static str,
-    pub logs_endpoint: &'static str,
 }
 
-#[derive(Debug, Deserialize)]
-struct JsonRpcRequest {
-    jsonrpc: String,
-    method: String,
-    #[serde(default)]
-    id: Option<Value>,
+const SERVICES_RESOURCE_URI: &str = "resource://services/snapshot";
+const LOGS_RESOURCE_URI: &str = "resource://logs/recent";
+
+#[macros::mcp_tool(
+    name = "list_services",
+    description = "List systemd service units and current state"
+)]
+#[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
+struct ListServicesTool {}
+
+#[macros::mcp_tool(
+    name = "list_logs",
+    description = "List journald logs with filters and bounds"
+)]
+#[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
+struct ListLogsTool {
+    priority: Option<String>,
+    unit: Option<String>,
+    start_utc: String,
+    end_utc: String,
+    limit: Option<u32>,
 }
 
 pub async fn health() -> Json<HealthResponse> {
@@ -52,74 +79,378 @@ pub async fn discovery() -> Json<DiscoveryResponse> {
         name: env!("CARGO_PKG_NAME"),
         version: env!("CARGO_PKG_VERSION"),
         mcp_endpoint: "/mcp",
-        services_endpoint: "/services",
-        logs_endpoint: "/logs",
     })
 }
 
-pub async fn mcp_endpoint(body: Bytes) -> Json<Value> {
-    let parsed: JsonRpcRequest = match serde_json::from_slice(&body) {
-        Ok(request) => request,
-        Err(_) => return Json(json_rpc_error(None, -32700, "Parse error")),
+pub async fn mcp_endpoint(State(state): State<AppState>, body: Bytes) -> Response {
+    let payload: Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return (
+                StatusCode::OK,
+                Json(json_rpc_error(None, -32700, "Parse error")),
+            )
+                .into_response()
+        }
     };
 
-    if parsed.jsonrpc != "2.0" || parsed.method.trim().is_empty() {
-        return Json(json_rpc_error(parsed.id, -32600, "Invalid Request"));
-    }
+    if let Some(batch) = payload.as_array() {
+        if batch.is_empty() {
+            return (
+                StatusCode::OK,
+                Json(vec![json_rpc_error(None, -32600, "Invalid Request")]),
+            )
+                .into_response();
+        }
 
-    match parsed.method.as_str() {
-        "initialize" => Json(json!({
-            "jsonrpc": "2.0",
-            "id": parsed.id,
-            "result": {
-                "protocolVersion": "2024-11-05",
-                "serverInfo": {
-                    "name": env!("CARGO_PKG_NAME"),
-                    "version": env!("CARGO_PKG_VERSION")
-                },
-                "capabilities": {
-                    "tools": {
-                        "listChanged": false
-                    },
-                    "resources": {
-                        "subscribe": false,
-                        "listChanged": false
-                    },
-                    "prompts": {
-                        "listChanged": false
-                    }
-                },
-                "metadata": {
-                    "restEndpoints": {
-                        "services": "/services",
-                        "logs": "/logs"
-                    }
-                }
+        let mut responses = Vec::new();
+        for item in batch {
+            if let Some(response) = handle_json_rpc_value(&state, item.clone()).await {
+                responses.push(response);
             }
-        })),
-        "ping" => Json(json!({
-            "jsonrpc": "2.0",
-            "id": parsed.id,
-            "result": {}
-        })),
-        _ => Json(json_rpc_error(parsed.id, -32601, "Method not found")),
+        }
+
+        if responses.is_empty() {
+            return StatusCode::NO_CONTENT.into_response();
+        }
+
+        return (StatusCode::OK, Json(Value::Array(responses))).into_response();
+    }
+
+    match handle_json_rpc_value(&state, payload).await {
+        Some(response) => (StatusCode::OK, Json(response)).into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
     }
 }
 
-pub async fn list_services(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<UnitStatus>>, AppError> {
-    let units = state.unit_provider.list_service_units().await?;
-    Ok(Json(units))
+async fn handle_json_rpc_value(state: &AppState, payload: Value) -> Option<Value> {
+    if !payload.is_object() {
+        return Some(json_rpc_error(None, -32600, "Invalid Request"));
+    }
+
+    let request_id = payload.get("id").cloned();
+    let parsed: JsonrpcMessage = match serde_json::from_value(payload) {
+        Ok(message) => message,
+        Err(_) => return Some(json_rpc_error(request_id, -32600, "Invalid Request")),
+    };
+
+    match parsed {
+        JsonrpcMessage::Request(request) => {
+            if let Err(error_response) = validate_request_shape(&request) {
+                return Some(error_response);
+            }
+
+            let request_id = request_id_to_value(request.id);
+            if request.method.trim().is_empty() {
+                return Some(json_rpc_error(Some(request_id), -32600, "Invalid Request"));
+            }
+
+            Some(
+                handle_json_rpc_request(
+                    state,
+                    Some(request_id),
+                    request.method,
+                    request.params.map(Value::Object),
+                )
+                .await,
+            )
+        }
+        JsonrpcMessage::Notification(notification) => {
+            if notification.method.trim().is_empty() {
+                return None;
+            }
+
+            let _ = handle_json_rpc_request(
+                state,
+                None,
+                notification.method,
+                notification.params.map(Value::Object),
+            )
+            .await;
+            None
+        }
+        JsonrpcMessage::ResultResponse(_) | JsonrpcMessage::ErrorResponse(_) => {
+            Some(json_rpc_error(request_id, -32600, "Invalid Request"))
+        }
+    }
 }
 
-pub async fn list_logs(
-    State(state): State<AppState>,
-    Query(params): Query<LogsQueryParams>,
-) -> Result<Json<Vec<JournalLogEntry>>, AppError> {
-    let query = build_log_query(params)?;
-    let logs = state.unit_provider.list_journal_logs(&query).await?;
-    Ok(Json(logs))
+fn validate_request_shape(request: &JsonrpcRequest) -> Result<(), Value> {
+    let payload = serde_json::to_value(request).expect("jsonrpc request serialization");
+    let request_id = Some(request_id_to_value(request.id.clone()));
+
+    let valid = match request.method.as_str() {
+        "tools/call" => serde_json::from_value::<CallToolRequest>(payload).is_ok(),
+        "resources/read" => serde_json::from_value::<ReadResourceRequest>(payload).is_ok(),
+        "tools/list" => serde_json::from_value::<ListToolsRequest>(payload).is_ok(),
+        "resources/list" => serde_json::from_value::<ListResourcesRequest>(payload).is_ok(),
+        "ping" => serde_json::from_value::<PingRequest>(payload).is_ok(),
+        "initialize" => serde_json::from_value::<InitializeRequest>(payload).is_ok(),
+        _ => true,
+    };
+
+    if valid {
+        Ok(())
+    } else {
+        Err(json_rpc_error(request_id, -32602, "Invalid params"))
+    }
+}
+
+async fn handle_json_rpc_request(
+    state: &AppState,
+    id: Option<Value>,
+    method: String,
+    params: Option<Value>,
+) -> Value {
+    match method.as_str() {
+        "initialize" => {
+            let initialize_result = InitializeResult {
+                server_info: Implementation {
+                    name: env!("CARGO_PKG_NAME").to_string(),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    title: None,
+                    description: None,
+                    icons: vec![],
+                    website_url: None,
+                },
+                capabilities: ServerCapabilities {
+                    tools: Some(ServerCapabilitiesTools {
+                        list_changed: Some(false),
+                    }),
+                    resources: Some(ServerCapabilitiesResources {
+                        subscribe: Some(false),
+                        list_changed: Some(false),
+                    }),
+                    prompts: Some(ServerCapabilitiesPrompts {
+                        list_changed: Some(false),
+                    }),
+                    ..Default::default()
+                },
+                protocol_version: ProtocolVersion::V2024_11_05.into(),
+                instructions: None,
+                meta: None,
+            };
+
+            json_rpc_result(
+                id,
+                serde_json::to_value(initialize_result).expect("initialize result serialization"),
+            )
+        }
+        "ping" => json_rpc_result(id, json!({})),
+        "tools/list" => json_rpc_result(
+            id,
+            serde_json::to_value(ListToolsResult {
+                meta: None,
+                next_cursor: None,
+                tools: build_tools_list(),
+            })
+            .expect("tools list result serialization"),
+        ),
+        "tools/call" => handle_tools_call(state, id, params).await,
+        "resources/list" => json_rpc_result(
+            id,
+            serde_json::to_value(ListResourcesResult {
+                meta: None,
+                next_cursor: None,
+                resources: vec![
+                    Resource {
+                        annotations: None,
+                        description: Some("Current systemd service statuses".to_string()),
+                        icons: vec![],
+                        meta: None,
+                        mime_type: Some("application/json".to_string()),
+                        name: "Service Snapshot".to_string(),
+                        size: None,
+                        title: None,
+                        uri: SERVICES_RESOURCE_URI.to_string(),
+                    },
+                    Resource {
+                        annotations: None,
+                        description: Some("Recent journald logs for the last hour".to_string()),
+                        icons: vec![],
+                        meta: None,
+                        mime_type: Some("application/json".to_string()),
+                        name: "Recent Logs Snapshot".to_string(),
+                        size: None,
+                        title: None,
+                        uri: LOGS_RESOURCE_URI.to_string(),
+                    },
+                ],
+            })
+            .expect("resources list result serialization"),
+        ),
+        "resources/read" => handle_resources_read(state, id, params).await,
+        _ => json_rpc_error(id, -32601, "Method not found"),
+    }
+}
+
+async fn handle_tools_call(state: &AppState, id: Option<Value>, params: Option<Value>) -> Value {
+    let Some(raw_params) = params else {
+        return json_rpc_error(id, -32602, "Invalid params");
+    };
+
+    let tool_call: CallToolRequestParams = match serde_json::from_value(raw_params) {
+        Ok(value) => value,
+        Err(_) => return json_rpc_error(id, -32602, "Invalid params"),
+    };
+
+    match tool_call.name.as_str() {
+        "list_services" => match state.unit_provider.list_service_units().await {
+            Ok(services) => json_rpc_result(
+                id,
+                serde_json::to_value(CallToolResult {
+                    content: vec![ContentBlock::from(TextContent::new(
+                        format!("Returned {} services", services.len()),
+                        None,
+                        None,
+                    ))],
+                    is_error: None,
+                    meta: None,
+                    structured_content: Some(serde_json::Map::from_iter([(
+                        "services".to_string(),
+                        json!(services),
+                    )])),
+                })
+                .expect("list_services tool result serialization"),
+            ),
+            Err(err) => app_error_to_json_rpc(id, err),
+        },
+        "list_logs" => {
+            let query_params: LogsQueryParams =
+                match serde_json::from_value(json!(tool_call.arguments.unwrap_or_default())) {
+                    Ok(value) => value,
+                    Err(_) => return json_rpc_error(id, -32602, "Invalid params"),
+                };
+
+            let query = match build_log_query(query_params) {
+                Ok(query) => query,
+                Err(err) => return app_error_to_json_rpc(id, err),
+            };
+
+            match state.unit_provider.list_journal_logs(&query).await {
+                Ok(logs) => json_rpc_result(
+                    id,
+                    serde_json::to_value(CallToolResult {
+                        content: vec![ContentBlock::from(TextContent::new(
+                            format!("Returned {} log entries", logs.len()),
+                            None,
+                            None,
+                        ))],
+                        is_error: None,
+                        meta: None,
+                        structured_content: Some(serde_json::Map::from_iter([(
+                            "logs".to_string(),
+                            json!(logs),
+                        )])),
+                    })
+                    .expect("list_logs tool result serialization"),
+                ),
+                Err(err) => app_error_to_json_rpc(id, err),
+            }
+        }
+        _ => json_rpc_error(id, -32601, "Method not found"),
+    }
+}
+
+async fn handle_resources_read(
+    state: &AppState,
+    id: Option<Value>,
+    params: Option<Value>,
+) -> Value {
+    let Some(raw_params) = params else {
+        return json_rpc_error(id, -32602, "Invalid params");
+    };
+
+    let resource_read: ReadResourceRequestParams = match serde_json::from_value(raw_params) {
+        Ok(value) => value,
+        Err(_) => return json_rpc_error(id, -32602, "Invalid params"),
+    };
+
+    match resource_read.uri.as_str() {
+        SERVICES_RESOURCE_URI => match state.unit_provider.list_service_units().await {
+            Ok(services) => {
+                let structured_content = json!({ "services": services });
+                let result = serde_json::to_value(ReadResourceResult {
+                    contents: vec![ReadResourceContent::from(TextResourceContents {
+                        meta: None,
+                        mime_type: Some("application/json".to_string()),
+                        text: structured_content.to_string(),
+                        uri: SERVICES_RESOURCE_URI.to_string(),
+                    })],
+                    meta: None,
+                })
+                .expect("read services result serialization");
+
+                json_rpc_result(id, result)
+            }
+            Err(err) => app_error_to_json_rpc(id, err),
+        },
+        LOGS_RESOURCE_URI => {
+            let end_utc = Utc::now();
+            let start_utc = end_utc - Duration::hours(1);
+            let query = LogQuery {
+                priority: None,
+                unit: None,
+                start_utc: Some(start_utc),
+                end_utc: Some(end_utc),
+                limit: DEFAULT_LOG_LIMIT,
+            };
+
+            match state.unit_provider.list_journal_logs(&query).await {
+                Ok(logs) => {
+                    let structured_content = json!({ "logs": logs });
+                    let result = serde_json::to_value(ReadResourceResult {
+                        contents: vec![ReadResourceContent::from(TextResourceContents {
+                            meta: None,
+                            mime_type: Some("application/json".to_string()),
+                            text: structured_content.to_string(),
+                            uri: LOGS_RESOURCE_URI.to_string(),
+                        })],
+                        meta: None,
+                    })
+                    .expect("read logs result serialization");
+
+                    json_rpc_result(id, result)
+                }
+                Err(err) => app_error_to_json_rpc(id, err),
+            }
+        }
+        _ => json_rpc_error(id, -32601, "Method not found"),
+    }
+}
+
+fn build_tools_list() -> Vec<Tool> {
+    vec![ListServicesTool::tool(), ListLogsTool::tool()]
+}
+
+fn app_error_to_json_rpc(id: Option<Value>, err: AppError) -> Value {
+    match err {
+        AppError::BadRequest { code, message } => json_rpc_error_with_data(
+            id,
+            -32602,
+            "Invalid params",
+            Some(json!({
+                "code": code,
+                "message": message,
+                "details": {}
+            })),
+        ),
+        AppError::Unauthorized { code, message } | AppError::Forbidden { code, message } => {
+            json_rpc_error_with_data(
+                id,
+                -32001,
+                "Unauthorized",
+                Some(json!({
+                    "code": code,
+                    "message": message,
+                    "details": {}
+                })),
+            )
+        }
+        AppError::Internal { .. } | AppError::NotImplemented { .. } => {
+            json_rpc_error(id, -32603, "Internal error")
+        }
+    }
 }
 
 fn build_log_query(params: LogsQueryParams) -> Result<LogQuery, AppError> {
@@ -250,14 +581,53 @@ fn normalize_unit(unit: Option<String>) -> Result<Option<String>, AppError> {
 }
 
 fn json_rpc_error(id: Option<Value>, code: i32, message: &str) -> Value {
+    json_rpc_error_with_data(id, code, message, None)
+}
+
+fn json_rpc_error_with_data(
+    id: Option<Value>,
+    code: i32,
+    message: &str,
+    data: Option<Value>,
+) -> Value {
+    let response = JsonrpcErrorResponse::new(
+        RpcError {
+            code: i64::from(code),
+            data,
+            message: message.to_string(),
+        },
+        id.as_ref().and_then(value_to_request_id),
+    );
+    serde_json::to_value(response).expect("jsonrpc error response serialization")
+}
+
+fn json_rpc_result(id: Option<Value>, result: Value) -> Value {
+    if let Some(request_id) = id.as_ref().and_then(value_to_request_id) {
+        let extra = result.as_object().cloned();
+        let response = JsonrpcResultResponse::new(request_id, McpResult { meta: None, extra });
+        return serde_json::to_value(response).expect("jsonrpc result response serialization");
+    }
+
     json!({
         "jsonrpc": "2.0",
         "id": id,
-        "error": {
-            "code": code,
-            "message": message
-        }
+        "result": result
     })
+}
+
+fn value_to_request_id(value: &Value) -> Option<RequestId> {
+    if let Some(string_id) = value.as_str() {
+        return Some(RequestId::String(string_id.to_string()));
+    }
+
+    value.as_i64().map(RequestId::Integer)
+}
+
+fn request_id_to_value(id: RequestId) -> Value {
+    match id {
+        RequestId::String(value) => Value::String(value),
+        RequestId::Integer(value) => Value::Number(value.into()),
+    }
 }
 
 #[cfg(test)]

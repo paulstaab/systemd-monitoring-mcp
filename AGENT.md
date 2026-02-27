@@ -1,13 +1,13 @@
 # Agent Instructions for systemd-monitoring-mcp
 
 `systemd-monitoring-mcp` is an MCP server that exposes selective functionality for monitoring
-a Linux server over HTTP.
+a Linux server over JSON-RPC.
 
 ## Project Overview
 - Runtime: single Rust binary.
 - API scope (MVP):
   - `GET /health` (public)
-  - `GET /services` (requires bearer token)
+  - `POST /mcp` (requires bearer token)
 - Auth: static token from environment variable `MCP_API_TOKEN`.
 - Unit source: systemd via `systemd` crate + D-Bus integration.
 
@@ -31,8 +31,8 @@ When asked to implement new features or changes, execute the following steps
   3. Generate a plan for implementing the changes
   4. Generate test cases for the requirements in a separate artifact (not in `docs/requirements.md`).
   5. Extend or update the smoke test script `scripts/smoke-test.sh`
-  5. Implement the changes.
-  6. Run tests and linters and investigate and fix any problems.
+  6. Implement the changes.
+  7. Run tests and linters and investigate and fix any problems.
 
 ## Requirements
 - Collect requirements in `docs/requirements.md`. 
@@ -56,6 +56,9 @@ Recommended verification sequence before handoff:
 3. `cargo clippy --all-targets -- -D warnings`
 4. `cargo test`
 
+Copy-paste one-liner:
+- `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`
+
 ## Run and Local Smoke Checks
 - Minimal run:
   - `export MCP_API_TOKEN="change-me"`
@@ -65,14 +68,23 @@ Recommended verification sequence before handoff:
   - `export BIND_PORT="8080"`
 - Smoke checks:
   - `curl -s http://127.0.0.1:8080/health`
-  - `curl -i -s http://127.0.0.1:8080/services`
-  - `curl -s -H "Authorization: Bearer change-me" http://127.0.0.1:8080/services`
+  - `curl -s -H "Authorization: Bearer change-me" -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"example-client","version":"1.0.0"},"capabilities":{}}}' http://127.0.0.1:8080/mcp`
+  - `curl -s -H "Authorization: Bearer change-me" -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' http://127.0.0.1:8080/mcp`
 
 ## Implementation Notes
 - Keep API behavior strictly aligned with `docs/requirements.md`.
-- Preserve structured error responses (`code`, `message`, `details`) for non-2xx responses.
+- Preserve structured HTTP error responses (`code`, `message`, `details`) for non-2xx responses.
+- Preserve JSON-RPC error shape for MCP method failures.
 - Never log secrets (`MCP_API_TOKEN` or bearer token values).
 - Keep non-systemd-dependent logic testable via abstractions/mocks.
+
+## MCP Protocol Notes
+- Prefer implementing monitoring functionality through MCP methods (`tools/list`, `tools/call`, `resources/list`, `resources/read`) instead of REST business endpoints.
+- Keep MCP transport strict to `POST /mcp` (no root `/` alias behavior).
+- Use fixed resource URIs: `resource://services/snapshot` and `resource://logs/recent`.
+- Return canonical machine-readable JSON in `structuredContent` for successful `tools/call` and `resources/read` responses.
+- Keep capability advertising in `initialize` synchronized with what is actually implemented.
+- Maintain strict JSON-RPC behavior for notifications, batch requests, and standard error codes (`-32700`, `-32600`, `-32601`, `-32602`).
 
 ## Technology
 - `systemd-monitoring-mcp` is a single binary written in Rust
