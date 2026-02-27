@@ -5,6 +5,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use ipnet::IpNet;
 
 pub mod api;
 pub mod auth;
@@ -18,13 +19,19 @@ use systemd_client::UnitProvider;
 #[derive(Clone)]
 pub struct AppState {
     pub api_token: Arc<str>,
+    pub allowed_cidr: Option<IpNet>,
     pub unit_provider: Arc<dyn UnitProvider>,
 }
 
 impl AppState {
-    pub fn new(api_token: String, unit_provider: Arc<dyn UnitProvider>) -> Self {
+    pub fn new(
+        api_token: String,
+        allowed_cidr: Option<IpNet>,
+        unit_provider: Arc<dyn UnitProvider>,
+    ) -> Self {
         Self {
             api_token: Arc::<str>::from(api_token),
+            allowed_cidr,
             unit_provider,
         }
     }
@@ -44,6 +51,10 @@ pub fn build_app(state: AppState) -> Router {
         .route("/.well-known/mcp", get(api::discovery))
         .route("/mcp", post(api::mcp_endpoint))
         .merge(protected)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::enforce_ip_allowlist,
+        ))
         .layer(middleware::from_fn(logging::request_logging_middleware))
         .with_state(state)
 }
@@ -54,6 +65,7 @@ mod tests {
 
     use axum::{
         body::Body,
+        extract::connect_info::ConnectInfo,
         http::{header, Request, StatusCode},
     };
     use http_body_util::BodyExt;
@@ -97,7 +109,16 @@ mod tests {
     }
 
     fn app() -> Router {
-        let state = AppState::new("token-1".to_string(), Arc::new(MockProvider));
+        let state = AppState::new("token-1".to_string(), None, Arc::new(MockProvider));
+        build_app(state)
+    }
+
+    fn app_with_allowed_cidr(cidr: &str) -> Router {
+        let state = AppState::new(
+            "token-1".to_string(),
+            Some(cidr.parse().expect("valid cidr")),
+            Arc::new(MockProvider),
+        );
         build_app(state)
     }
 
@@ -305,6 +326,46 @@ mod tests {
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from("{"))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn request_outside_allowed_cidr_is_blocked() {
+        let response = app_with_allowed_cidr("10.0.0.0/8")
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .method("GET")
+                    .extension(ConnectInfo(std::net::SocketAddr::from((
+                        [192, 168, 1, 10],
+                        9000,
+                    ))))
+                    .body(Body::empty())
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn request_inside_allowed_cidr_is_permitted() {
+        let response = app_with_allowed_cidr("10.0.0.0/8")
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .method("GET")
+                    .extension(ConnectInfo(std::net::SocketAddr::from((
+                        [10, 1, 2, 3],
+                        9000,
+                    ))))
+                    .body(Body::empty())
                     .expect("request build"),
             )
             .await

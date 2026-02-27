@@ -1,4 +1,5 @@
 use axum::{
+    extract::connect_info::ConnectInfo,
     extract::{Request, State},
     http::header,
     middleware::Next,
@@ -26,6 +27,33 @@ pub async fn require_bearer_token(
             "invalid_token",
             "invalid bearer token",
         ));
+    }
+
+    Ok(next.run(request).await)
+}
+
+pub async fn enforce_ip_allowlist(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    if let Some(allowed_cidr) = state.allowed_cidr.as_ref() {
+        let connect_info = request
+            .extensions()
+            .get::<ConnectInfo<std::net::SocketAddr>>()
+            .ok_or_else(|| {
+                AppError::forbidden(
+                    "ip_restricted",
+                    "request source IP is unavailable for allowlist validation",
+                )
+            })?;
+
+        if !allowed_cidr.contains(&connect_info.0.ip()) {
+            return Err(AppError::forbidden(
+                "ip_restricted",
+                "request source IP is not allowed",
+            ));
+        }
     }
 
     Ok(next.run(request).await)
