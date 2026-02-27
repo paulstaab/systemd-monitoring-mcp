@@ -32,7 +32,7 @@ impl Config {
             .filter(|token| !token.is_empty())
             .ok_or(ConfigError::MissingApiToken)?;
 
-        let bind_addr = env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0".to_string());
+        let bind_addr = env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1".to_string());
         let bind_port = env::var("BIND_PORT")
             .ok()
             .map(|value| value.parse::<u16>().map_err(|_| ConfigError::InvalidPort))
@@ -79,7 +79,7 @@ mod tests {
         env::remove_var("MCP_ALLOWED_CIDR");
 
         let config = Config::from_env().expect("config should parse");
-        assert_eq!(config.bind_addr, "0.0.0.0");
+        assert_eq!(config.bind_addr, "127.0.0.1");
         assert_eq!(config.bind_port, 8080);
         assert_eq!(config.allowed_cidr, None);
     }
