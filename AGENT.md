@@ -24,9 +24,8 @@ a Linux server over HTTP.
   - `src/errors.rs`
   - `src/logging.rs`
 
-## Requirements
-- Collect requirements in `docs/requirements.md`. 
-- When asked to implement new features or changes, execute the following steps
+## Workflow
+When asked to implement new features or changes, execute the following steps
   1. If neccessary, ask the user clarifying questions.
   2. Update the requirements in `docs/requirements.md`
   3. Generate a plan for implementing the changes
@@ -34,9 +33,11 @@ a Linux server over HTTP.
   5. Extend or update the smoke test script `scripts/smoke-test.sh`
   5. Implement the changes.
   6. Run tests and linters and investigate and fix any problems.
+
+## Requirements
+- Collect requirements in `docs/requirements.md`. 
 - The MCP should only offer capabilities described in the requirements.
 - Do not include acceptance criteria or test cases in the requirements document.
-- Do not run the smoke-test script. Ask to user to do it instead.
 
 ## Build, Lint, Test
 - Fast compile check:

@@ -20,10 +20,12 @@ The server must be configurable via environment variables:
 - `MCP_API_TOKEN` (required): static bearer token used for API authentication.
 - `BIND_ADDR` (optional): bind address, default `0.0.0.0`.
 - `BIND_PORT` (optional): bind port, default `8080`.
+- `MCP_ALLOWED_CIDR` (optional): CIDR range allowlist for incoming request source IPs.
 
 Startup behavior:
 - If `MCP_API_TOKEN` is missing or empty, server startup must fail with a clear error message.
 - If optional bind values are missing, defaults must be applied.
+- If `MCP_ALLOWED_CIDR` is set but invalid, server startup must fail with a clear error message.
 - If systemd is not available on the host/runtime environment, server startup must fail with a clear error message.
 
 ## 3. API Requirements
@@ -126,6 +128,11 @@ Status codes:
 
 CORS:
 - CORS must not be enabled in MVP (server-to-server usage only).
+
+Request source IP allowlist:
+- If `MCP_ALLOWED_CIDR` is not set, no source-IP filtering is applied.
+- If `MCP_ALLOWED_CIDR` is set, requests from source IPs outside the range must be rejected.
+- Rejected requests must return `403 Forbidden` with the standard JSON error shape.
 
 ## 5. Error Response Format
 
