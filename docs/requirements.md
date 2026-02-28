@@ -152,13 +152,7 @@ Rules:
 ## 6. Logging Requirements
 
 Minimum required logs:
-- Startup logs including effective bind address/port.
-- Authentication failure logs for rejected MCP requests.
-- Request summary logs (method, path, status, duration).
-- MCP method-level failure logs with stable error identifiers.
 
 Sensitive data handling:
-- Never log `MCP_API_TOKEN` value.
-- Never log bearer token values from requests.
-- Never log raw credentials contained in MCP params.
+- MCP method-level failure logs with stable error identifiers.
 
