@@ -115,13 +115,18 @@ mod tests {
     }
 
     fn app() -> Router {
-        let state = AppState::new("token-1".to_string(), None, vec![], Arc::new(MockProvider));
+        let state = AppState::new(
+            "token-1234567890ab".to_string(),
+            None,
+            vec![],
+            Arc::new(MockProvider),
+        );
         build_app(state)
     }
 
     fn app_with_allowed_cidr(cidr: &str) -> Router {
         let state = AppState::new(
-            "token-1".to_string(),
+            "token-1234567890ab".to_string(),
             Some(cidr.parse().expect("valid cidr")),
             vec![],
             Arc::new(MockProvider),
@@ -250,7 +255,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(r#"{"jsonrpc":"2.0","id":1,"method":"unknown"}"#))
                     .expect("request build"),
             )
@@ -278,7 +283,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test-client","version":"1.0.0"},"capabilities":{}}}"#,
                     ))
@@ -310,7 +315,7 @@ mod tests {
         );
         assert!(body_json["result"]["capabilities"]["tools"].is_object());
         assert!(body_json["result"]["capabilities"]["resources"].is_object());
-        assert!(body_json["result"]["capabilities"]["prompts"].is_object());
+        assert!(body_json["result"]["capabilities"]["prompts"].is_null());
     }
 
     #[tokio::test]
@@ -321,7 +326,7 @@ mod tests {
                     .uri("/")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
                     ))
@@ -341,7 +346,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
                     ))
@@ -375,7 +380,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_services","arguments":{}}}"#,
                     ))
@@ -408,7 +413,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"inactive"}}}"#,
                     ))
@@ -449,7 +454,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":33,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"running"}}}"#,
                     ))
@@ -482,7 +487,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","limit":10}}}"#,
                     ))
@@ -514,7 +519,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"resource://services/snapshot"}}"#,
                     ))
@@ -547,7 +552,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":43,"method":"resources/read","params":{"uri":"resource://services/failed"}}"#,
                     ))
@@ -590,7 +595,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":41,"method":"resources/list","params":{}}"#,
                     ))
@@ -634,7 +639,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","limit":1001}}}"#,
                     ))
@@ -667,7 +672,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(r#"{"jsonrpc":"2.0","method":"ping"}"#))
                     .expect("request build"),
             )
@@ -692,7 +697,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"[{"jsonrpc":"2.0","method":"ping"},{"jsonrpc":"2.0","method":"tools/list","params":{}}]"#,
                     ))
@@ -719,7 +724,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"[{"jsonrpc":"2.0","method":"ping"},{"jsonrpc":"2.0","id":100,"method":"ping"},{"jsonrpc":"2.0","id":200,"method":"tools/list","params":{}}]"#,
                     ))
@@ -750,14 +755,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_resources_read_unknown_uri_returns_method_not_found() {
+    async fn mcp_resources_read_unknown_uri_returns_resource_not_found_data() {
         let response = app()
             .oneshot(
                 Request::builder()
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":501,"method":"resources/read","params":{"uri":"resource://unknown/item"}}"#,
                     ))
@@ -779,6 +784,40 @@ mod tests {
         assert_eq!(body_json["jsonrpc"], "2.0");
         assert_eq!(body_json["id"], 501);
         assert_eq!(body_json["error"]["code"], -32601);
+        assert_eq!(body_json["error"]["data"]["code"], "resource_not_found");
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_call_unknown_tool_returns_tool_not_found_data() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":503,"method":"tools/call","params":{"name":"unknown_tool","arguments":{}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 503);
+        assert_eq!(body_json["error"]["code"], -32601);
+        assert_eq!(body_json["error"]["data"]["code"], "tool_not_found");
     }
 
     #[tokio::test]
@@ -789,7 +828,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
                         r#"{"jsonrpc":"2.0","id":502,"method":"tools/call","params":{"name":"list_logs","arguments":"not-an-object"}}"#,
                     ))
@@ -821,7 +860,7 @@ mod tests {
                     .uri("/mcp")
                     .method("POST")
                     .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from("{"))
                     .expect("request build"),
             )
