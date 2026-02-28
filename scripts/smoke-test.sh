@@ -43,9 +43,18 @@ assert_contains() {
 assert_log_contains() {
   local needle="$1"
   local message="$2"
-  if ! grep -Fq "$needle" "$SERVER_LOG"; then
-    fail "$message"
-  fi
+  local attempts=0
+  local max_attempts=30
+
+  while (( attempts < max_attempts )); do
+    if grep -aFq "$needle" "$SERVER_LOG"; then
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    sleep 0.1
+  done
+
+  fail "$message"
 }
 
 wait_for_health() {

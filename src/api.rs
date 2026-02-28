@@ -694,9 +694,7 @@ fn request_id_to_value(id: RequestId) -> Value {
 mod tests {
     use serde_json::json;
 
-    use super::{
-        build_log_query, redact_audit_params, LogsQueryParams, MAX_LOG_LIMIT,
-    };
+    use super::{build_log_query, redact_audit_params, LogsQueryParams, MAX_LOG_LIMIT};
 
     #[test]
     fn rejects_limit_above_max() {
@@ -789,6 +787,9 @@ mod tests {
         assert_eq!(redacted["arguments"]["unit"], json!("sshd.service"));
         assert_eq!(redacted["arguments"]["token"], json!("[REDACTED]"));
         assert_eq!(redacted["arguments"]["api_key"], json!("[REDACTED]"));
-        assert_eq!(redacted["arguments"]["nested"]["secret"], json!("[REDACTED]"));
+        assert_eq!(
+            redacted["arguments"]["nested"]["secret"],
+            json!("[REDACTED]")
+        );
     }
 }
