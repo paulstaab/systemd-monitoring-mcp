@@ -70,7 +70,7 @@ pub fn build_log_query(params: LogsQueryParams) -> Result<LogQuery, AppError> {
         ));
     }
 
-    if let (Some(start), Some(end)) = (start_utc, end_utc) {
+    if let (Some(start), Some(end)) = (start_utc.as_ref(), end_utc.as_ref()) {
         if start > end {
             return Err(AppError::bad_request(
                 "invalid_time_range",
