@@ -566,6 +566,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mcp_tools_call_list_services_rejects_invalid_unit_name_prefix() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":36,"method":"tools/call","params":{"name":"list_services","arguments":{"unit_name_prefix":"sshd/prod"}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 36);
+        assert_eq!(body_json["error"]["code"], -32602);
+        assert_eq!(
+            body_json["error"]["data"]["code"],
+            "invalid_unit_name_prefix"
+        );
+    }
+
+    #[tokio::test]
     async fn mcp_tools_call_list_logs_returns_structured_content() {
         let response = app()
             .oneshot(
