@@ -26,7 +26,6 @@ Startup behavior:
 - If `MCP_API_TOKEN` is missing or empty, server startup must fail with a clear error message.
 - If `MCP_API_TOKEN` is shorter than 16 characters, server startup must fail with a clear error message.
 - If optional bind values are missing, defaults must be applied.
-- If `MCP_ALLOWED_CIDR` is set but invalid, server startup must fail with a clear error message.
 - If systemd is not available on the host/runtime environment, server startup must fail with a clear error message.
 
 ## 3. MCP Protocol Requirements

@@ -31,7 +31,7 @@ The application is organized into modules with a strict separation of concerns:
 - **`src/systemd_client.rs`**: System adapters connecting the application to DBus to fetch from Systemd and Journald. Included with traits to allow mocking in test scenarios.
 - **Cross-Cutting Modules** (`src/*.rs`):
   - `config.rs`: Extracting application configuration from environment properties securely.
-  - `auth.rs`: Access control middleware validating Bearer tokens and evaluating CIDR allowlists.
+  - `auth.rs`: Access control middleware validating Bearer tokens
   - `errors.rs`: Universal app errors defining business bounds instead of internal library faults.
   - `logging.rs`: Custom structured logging and JSON-RPC parameter redaction definitions.
 

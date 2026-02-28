@@ -220,6 +220,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mcp_non_bearer_auth_is_invalid_token() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Basic dXNlcjpwYXNz")
+                    .body(Body::from(r#"{"jsonrpc":"2.0","id":1,"method":"unknown"}"#))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["code"], "invalid_token");
+    }
+
+    #[tokio::test]
     async fn mcp_unknown_method_returns_method_not_found() {
         let response = app()
             .oneshot(

@@ -5,6 +5,7 @@
 - `GET /health` returns `200` with `{ "status": "ok" }` and no sensitive fields.
 - `POST /mcp` without authorization header returns `401` with `missing_token` code.
 - `POST /mcp` with non-bearer auth scheme returns `401` with `invalid_token` code.
+- `POST /mcp` with malformed authorization header value (header present but unparsable) returns `401` with `invalid_token` code.
 - `POST /mcp` with invalid bearer token returns `401` with `invalid_token` code.
 
 ## MCP Discovery and Initialize
