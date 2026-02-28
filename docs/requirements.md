@@ -69,6 +69,7 @@ Startup behavior:
   - `state` optional service state filter (`active`, `inactive`, `failed`, `activating`, `deactivating`, `reloading`).
   - `name_contains` optional service unit-name substring filter.
   - `limit` optional result cap, default `200`, maximum `1000`.
+  - `summary` optional boolean triage mode toggle.
 - If `state` is provided, only services matching that state must be returned.
 - `state` matching must be case-insensitive.
 - If `name_contains` is provided, only services whose `unit` contains that substring must be returned.
@@ -90,6 +91,10 @@ Startup behavior:
   - `returned` (integer): count of returned rows
   - `truncated` (boolean): true when `total > returned`
   - `generated_at_utc` (RFC3339 UTC string)
+- If `summary=true`, `list_services` must return a compact summary block including:
+  - `counts_by_active_state` (map)
+  - `failed_units` (array of objects with `unit`, `sub_state`, `result`, `since_utc`)
+  - `degraded_hint` (string or null)
 
 `list_logs` behavior:
 - Input parameters:
@@ -102,6 +107,7 @@ Startup behavior:
   - `order` optional sort order (`asc` or `desc`), default `desc`.
   - `allow_large_window` optional boolean override for large time ranges.
   - `limit` optional cap in range `1..1000`, default `200`.
+  - `summary` optional boolean triage mode toggle.
 - `unit` must contain only ASCII alphanumeric, `.`, `-`, `_`, `@`, and `:`.
 - `exclude_units` entries must contain only ASCII alphanumeric, `.`, `-`, `_`, `@`, and `:`.
 - `start_utc` must be strictly less than `end_utc`.
@@ -121,6 +127,11 @@ Startup behavior:
   - `truncated` (boolean)
   - `generated_at_utc` (RFC3339 UTC string)
   - `window` object containing `start_utc` and `end_utc`
+- If `summary=true`, `list_logs` must return a compact summary block including:
+  - `counts_by_unit` (top 10)
+  - `counts_by_priority`
+  - `top_messages` (deduplicated frequent messages, top 10)
+  - `error_hotspots` (units with highest error count)
 
 ### 3.5 MCP Resources
 - The server must implement `resources/list`.
