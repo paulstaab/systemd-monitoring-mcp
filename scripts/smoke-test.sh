@@ -171,16 +171,16 @@ list_services_filtered_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST
 [[ "$list_services_filtered_status" == "200" ]] || fail "tools/call list_services filtered returned ${list_services_filtered_status}, expected 200"
 assert_contains "$list_services_filtered_body" '"structuredContent"' "tools/call list_services filtered did not return structuredContent"
 
-echo "[smoke] checking POST /mcp tools/call list_services with unit_name_prefix filter"
+echo "[smoke] checking POST /mcp tools/call list_services with name_contains filter"
 list_services_prefix_filtered_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"jsonrpc":"2.0","id":124,"method":"tools/call","params":{"name":"list_services","arguments":{"unit_name_prefix":"ssh"}}}' \
+  -d '{"jsonrpc":"2.0","id":124,"method":"tools/call","params":{"name":"list_services","arguments":{"name_contains":"ssh"}}}' \
   "${BASE_URL}/mcp")"
 list_services_prefix_filtered_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"jsonrpc":"2.0","id":124,"method":"tools/call","params":{"name":"list_services","arguments":{"unit_name_prefix":"ssh"}}}' \
+  -d '{"jsonrpc":"2.0","id":124,"method":"tools/call","params":{"name":"list_services","arguments":{"name_contains":"ssh"}}}' \
   "${BASE_URL}/mcp")"
 [[ "$list_services_prefix_filtered_status" == "200" ]] || fail "tools/call list_services prefix filtered returned ${list_services_prefix_filtered_status}, expected 200"
 assert_contains "$list_services_prefix_filtered_body" '"structuredContent"' "tools/call list_services prefix filtered did not return structuredContent"
@@ -289,6 +289,10 @@ list_services_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
 [[ "$list_services_status" == "200" ]] || fail "tools/call list_services returned ${list_services_status}, expected 200"
 assert_contains "$list_services_body" '"structuredContent"' "tools/call list_services did not return structuredContent"
 assert_contains "$list_services_body" '"services"' "tools/call list_services did not include services payload"
+assert_contains "$list_services_body" '"total"' "tools/call list_services did not include total metadata"
+assert_contains "$list_services_body" '"returned"' "tools/call list_services did not include returned metadata"
+assert_contains "$list_services_body" '"truncated"' "tools/call list_services did not include truncated metadata"
+assert_contains "$list_services_body" '"generated_at_utc"' "tools/call list_services did not include generated_at_utc metadata"
 
 echo "[smoke] checking POST /mcp tools/call list_logs invalid limit"
 list_logs_invalid_limit_body="$(curl -sS -X POST \

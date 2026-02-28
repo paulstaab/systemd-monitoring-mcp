@@ -65,18 +65,31 @@ Startup behavior:
 
 `list_services` behavior:
 - Must return only `*.service` units.
-- Must return all matching units in a single result.
 - Input parameters:
   - `state` optional service state filter (`active`, `inactive`, `failed`, `activating`, `deactivating`, `reloading`).
-  - `unit_name_prefix` optional service unit-name prefix filter.
+  - `name_contains` optional service unit-name substring filter.
+  - `limit` optional result cap, default `200`, maximum `1000`.
 - If `state` is provided, only services matching that state must be returned.
 - `state` matching must be case-insensitive.
-- If `unit_name_prefix` is provided, only services whose `name` starts with that prefix must be returned.
-- `unit_name_prefix` must contain only ASCII alphanumeric, `.`, `-`, `_`, `@`, and `:`.
+- If `name_contains` is provided, only services whose `unit` contains that substring must be returned.
+- Default sorting must be by `unit` ascending.
+- If `state=failed`, sorting must be failed-first and then by `unit` ascending.
 - Each item must contain:
-  - `name` (string)
-  - `state` (string)
-  - `description` (string or null)
+  - `unit` (string)
+  - `description` (string)
+  - `load_state` (string)
+  - `active_state` (string)
+  - `sub_state` (string)
+  - `unit_file_state` (string or null)
+  - `since_utc` (RFC3339 UTC string or null)
+  - `main_pid` (integer or null)
+  - `exec_main_status` (integer or null)
+  - `result` (string or null)
+- `list_services` response metadata must include:
+  - `total` (integer): total matches before applying `limit`
+  - `returned` (integer): count of returned rows
+  - `truncated` (boolean): true when `total > returned`
+  - `generated_at_utc` (RFC3339 UTC string)
 
 `list_logs` behavior:
 - Must return log entries in descending timestamp order (newest first).

@@ -3,6 +3,7 @@
 //! Provides `list_services` and `list_logs` implementations by delegating to
 //! the `UnitProvider` systemd implementation dynamically.
 
+use chrono::{SecondsFormat, Utc};
 use rust_mcp_sdk::{
     macros,
     schema::{CallToolRequestParams, CallToolResult, ContentBlock, TextContent, Tool},
@@ -11,9 +12,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::domain::utils::{
-    filter_services_by_state, filter_services_by_unit_name_prefix, normalize_priority,
-    normalize_service_state, normalize_unit, normalize_unit_name_prefix, parse_utc,
-    DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT,
+    filter_services_by_name_contains, filter_services_by_state, normalize_name_contains,
+    normalize_priority, normalize_service_state, normalize_services_limit, normalize_unit,
+    parse_utc, sort_services, DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT,
 };
 use crate::mcp::rpc::{
     app_error_to_json_rpc, json_rpc_error, json_rpc_error_with_data, json_rpc_result,
@@ -23,7 +24,8 @@ use crate::{errors::AppError, systemd_client::LogQuery, AppState};
 #[derive(Debug, Deserialize)]
 pub struct ServicesQueryParams {
     pub state: Option<String>,
-    pub unit_name_prefix: Option<String>,
+    pub name_contains: Option<String>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,7 +44,8 @@ pub struct LogsQueryParams {
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct ListServicesTool {
     pub state: Option<String>,
-    pub unit_name_prefix: Option<String>,
+    pub name_contains: Option<String>,
+    pub limit: Option<u32>,
 }
 
 #[macros::mcp_tool(
@@ -125,33 +128,44 @@ pub async fn handle_tools_call(
                 Ok(value) => value,
                 Err(err) => return app_error_to_json_rpc(id, err),
             };
-            let unit_name_prefix_filter =
-                match normalize_unit_name_prefix(query_params.unit_name_prefix) {
-                    Ok(value) => value,
-                    Err(err) => return app_error_to_json_rpc(id, err),
-                };
+            let name_contains_filter = normalize_name_contains(query_params.name_contains);
+            let limit = match normalize_services_limit(query_params.limit) {
+                Ok(value) => value,
+                Err(err) => return app_error_to_json_rpc(id, err),
+            };
 
             match state.unit_provider.list_service_units().await {
-                Ok(services) => {
-                    let services = filter_services_by_state(services, state_filter.as_deref());
-                    let services = filter_services_by_unit_name_prefix(
-                        services,
-                        unit_name_prefix_filter.as_deref(),
-                    );
+                Ok(mut services) => {
+                    services = filter_services_by_state(services, state_filter.as_deref());
+                    services =
+                        filter_services_by_name_contains(services, name_contains_filter.as_deref());
+
+                    let failed_first = state_filter.as_deref() == Some("failed");
+                    sort_services(&mut services, failed_first);
+
+                    let total = services.len();
+                    let services = services.into_iter().take(limit).collect::<Vec<_>>();
+                    let returned = services.len();
+                    let truncated = total > returned;
+                    let generated_at_utc = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+
                     json_rpc_result(
                         id,
                         serde_json::to_value(CallToolResult {
                             content: vec![ContentBlock::from(TextContent::new(
-                                format!("Returned {} services", services.len()),
+                                format!("Returned {returned} of {total} services"),
                                 None,
                                 None,
                             ))],
                             is_error: None,
                             meta: None,
-                            structured_content: Some(serde_json::Map::from_iter([(
-                                "services".to_string(),
-                                json!(services),
-                            )])),
+                            structured_content: Some(serde_json::Map::from_iter([
+                                ("services".to_string(), json!(services)),
+                                ("total".to_string(), json!(total)),
+                                ("returned".to_string(), json!(returned)),
+                                ("truncated".to_string(), json!(truncated)),
+                                ("generated_at_utc".to_string(), json!(generated_at_utc)),
+                            ])),
                         })
                         .expect("list_services tool result serialization"),
                     )

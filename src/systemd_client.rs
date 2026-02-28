@@ -6,17 +6,26 @@
 use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
+use std::collections::HashMap;
 use systemd::{daemon, journal};
 use thiserror::Error;
+use tracing::warn;
 use zbus::{zvariant::OwnedObjectPath, Connection, Proxy};
 
 use crate::errors::AppError;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct UnitStatus {
-    pub name: String,
-    pub state: String,
-    pub description: Option<String>,
+    pub unit: String,
+    pub description: String,
+    pub load_state: String,
+    pub active_state: String,
+    pub sub_state: String,
+    pub unit_file_state: Option<String>,
+    pub since_utc: Option<String>,
+    pub main_pid: Option<u32>,
+    pub exec_main_status: Option<i32>,
+    pub result: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -41,7 +50,19 @@ pub struct JournalLogEntry {
 struct RawUnit {
     name: String,
     description: String,
+    load_state: String,
     active_state: String,
+    sub_state: String,
+    unit_path: OwnedObjectPath,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ServiceDetails {
+    unit_file_state: Option<String>,
+    since_utc: Option<String>,
+    main_pid: Option<u32>,
+    exec_main_status: Option<i32>,
+    result: Option<String>,
 }
 
 type ListUnitRecord = (
@@ -140,11 +161,11 @@ impl UnitProvider for DbusSystemdClient {
                 |(
                     name,
                     description,
-                    _load_state,
+                    load_state,
                     active_state,
-                    _sub_state,
+                    sub_state,
                     _following,
-                    _unit_path,
+                    unit_path,
                     _job_id,
                     _job_type,
                     _job_path,
@@ -152,13 +173,47 @@ impl UnitProvider for DbusSystemdClient {
                     RawUnit {
                         name,
                         description,
+                        load_state,
                         active_state,
+                        sub_state,
+                        unit_path,
                     }
                 },
             )
             .collect();
 
-        Ok(map_and_sort_service_units(raw_units))
+        let mut units = map_and_sort_service_units(raw_units.clone());
+        let unit_paths: HashMap<String, OwnedObjectPath> = raw_units
+            .into_iter()
+            .filter(|unit| unit.name.ends_with(".service"))
+            .map(|unit| (unit.name, unit.unit_path))
+            .collect();
+
+        for unit in &mut units {
+            let Some(unit_path) = unit_paths.get(&unit.unit) else {
+                continue;
+            };
+
+            match fetch_service_details(&connection, unit_path).await {
+                Ok(details) => {
+                    unit.unit_file_state = details.unit_file_state;
+                    unit.since_utc = details.since_utc;
+                    unit.main_pid = details.main_pid;
+                    unit.exec_main_status = details.exec_main_status;
+                    unit.result = details.result;
+                }
+                Err(err) => {
+                    warn!(
+                        unit = %unit.unit,
+                        unit_path = %unit_path.as_str(),
+                        error = %err,
+                        "failed to enrich service details from systemd"
+                    );
+                }
+            }
+        }
+
+        Ok(units)
     }
 
     async fn list_journal_logs(&self, query: &LogQuery) -> Result<Vec<JournalLogEntry>, AppError> {
@@ -176,18 +231,139 @@ fn map_and_sort_service_units(raw_units: Vec<RawUnit>) -> Vec<UnitStatus> {
         .into_iter()
         .filter(|unit| unit.name.ends_with(".service"))
         .map(|unit| UnitStatus {
-            name: unit.name,
-            state: unit.active_state,
-            description: if unit.description.trim().is_empty() {
-                None
-            } else {
-                Some(unit.description)
-            },
+            unit: unit.name,
+            description: unit.description,
+            load_state: unit.load_state,
+            active_state: unit.active_state,
+            sub_state: unit.sub_state,
+            unit_file_state: None,
+            since_utc: None,
+            main_pid: None,
+            exec_main_status: None,
+            result: None,
         })
         .collect();
 
-    units.sort_by(|left, right| left.name.cmp(&right.name));
+    units.sort_by(|left, right| left.unit.cmp(&right.unit));
     units
+}
+
+async fn fetch_service_details(
+    connection: &Connection,
+    unit_path: &OwnedObjectPath,
+) -> Result<ServiceDetails, AppError> {
+    let unit_proxy = Proxy::new(
+        connection,
+        "org.freedesktop.systemd1",
+        unit_path,
+        "org.freedesktop.systemd1.Unit",
+    )
+    .await
+    .map_err(|err| {
+        AppError::internal(format!(
+            "failed to create systemd unit proxy for {}: {err}",
+            unit_path.as_str()
+        ))
+    })?;
+
+    let unit_file_state = try_get_string_property(&unit_proxy, "UnitFileState").await?;
+    let since_utc = try_get_u64_property(&unit_proxy, "ActiveEnterTimestamp")
+        .await?
+        .and_then(format_systemd_timestamp_usec);
+
+    let service_proxy = Proxy::new(
+        connection,
+        "org.freedesktop.systemd1",
+        unit_path,
+        "org.freedesktop.systemd1.Service",
+    )
+    .await
+    .map_err(|err| {
+        AppError::internal(format!(
+            "failed to create systemd service proxy for {}: {err}",
+            unit_path.as_str()
+        ))
+    })?;
+
+    let main_pid = try_get_u32_property(&service_proxy, "MainPID")
+        .await?
+        .filter(|value| *value > 0);
+
+    let exec_main_status = try_get_u32_property(&service_proxy, "ExecMainStatus")
+        .await?
+        .and_then(|value| i32::try_from(value).ok());
+
+    let result = try_get_string_property(&service_proxy, "Result").await?;
+
+    Ok(ServiceDetails {
+        unit_file_state,
+        since_utc,
+        main_pid,
+        exec_main_status,
+        result,
+    })
+}
+
+async fn try_get_string_property(
+    proxy: &Proxy<'_>,
+    property_name: &str,
+) -> Result<Option<String>, AppError> {
+    proxy
+        .get_property::<String>(property_name)
+        .await
+        .map(|value| {
+            if value.trim().is_empty() {
+                None
+            } else {
+                Some(value)
+            }
+        })
+        .map_err(|err| {
+            AppError::internal(format!(
+                "failed to read systemd property {property_name}: {err}"
+            ))
+        })
+}
+
+async fn try_get_u64_property(
+    proxy: &Proxy<'_>,
+    property_name: &str,
+) -> Result<Option<u64>, AppError> {
+    proxy
+        .get_property::<u64>(property_name)
+        .await
+        .map(Some)
+        .map_err(|err| {
+            AppError::internal(format!(
+                "failed to read systemd property {property_name}: {err}"
+            ))
+        })
+}
+
+async fn try_get_u32_property(
+    proxy: &Proxy<'_>,
+    property_name: &str,
+) -> Result<Option<u32>, AppError> {
+    proxy
+        .get_property::<u32>(property_name)
+        .await
+        .map(Some)
+        .map_err(|err| {
+            AppError::internal(format!(
+                "failed to read systemd property {property_name}: {err}"
+            ))
+        })
+}
+
+fn format_systemd_timestamp_usec(timestamp_usec: u64) -> Option<String> {
+    if timestamp_usec == 0 {
+        return None;
+    }
+
+    i64::try_from(timestamp_usec)
+        .ok()
+        .and_then(DateTime::<Utc>::from_timestamp_micros)
+        .map(|timestamp| timestamp.to_rfc3339_opts(SecondsFormat::Millis, true))
 }
 
 fn read_journal_logs(query: &LogQuery) -> Result<Vec<JournalLogEntry>, AppError> {
@@ -309,6 +485,7 @@ fn read_journal_field(
 #[cfg(test)]
 mod tests {
     use super::{map_and_sort_service_units, JournalLogEntry, RawUnit};
+    use zbus::zvariant::OwnedObjectPath;
 
     #[test]
     fn filters_non_service_and_sorts() {
@@ -316,25 +493,40 @@ mod tests {
             RawUnit {
                 name: "z.service".to_string(),
                 description: "".to_string(),
+                load_state: "loaded".to_string(),
                 active_state: "active".to_string(),
+                sub_state: "running".to_string(),
+                unit_path: OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/z_2eservice")
+                    .expect("valid object path"),
             },
             RawUnit {
                 name: "a.socket".to_string(),
                 description: "Socket".to_string(),
+                load_state: "loaded".to_string(),
                 active_state: "active".to_string(),
+                sub_state: "running".to_string(),
+                unit_path: OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/a_2esocket")
+                    .expect("valid object path"),
             },
             RawUnit {
                 name: "a.service".to_string(),
                 description: "Alpha".to_string(),
+                load_state: "loaded".to_string(),
                 active_state: "failed".to_string(),
+                sub_state: "failed".to_string(),
+                unit_path: OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/a_2eservice")
+                    .expect("valid object path"),
             },
         ]);
 
         assert_eq!(mapped.len(), 2);
-        assert_eq!(mapped[0].name, "a.service");
-        assert_eq!(mapped[0].description.as_deref(), Some("Alpha"));
-        assert_eq!(mapped[1].name, "z.service");
-        assert!(mapped[1].description.is_none());
+        assert_eq!(mapped[0].unit, "a.service");
+        assert_eq!(mapped[0].description, "Alpha");
+        assert_eq!(mapped[0].load_state, "loaded");
+        assert_eq!(mapped[0].active_state, "failed");
+        assert_eq!(mapped[0].sub_state, "failed");
+        assert_eq!(mapped[1].unit, "z.service");
+        assert_eq!(mapped[1].description, "");
     }
 
     #[test]
