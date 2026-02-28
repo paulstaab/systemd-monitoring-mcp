@@ -171,6 +171,20 @@ list_services_filtered_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST
 [[ "$list_services_filtered_status" == "200" ]] || fail "tools/call list_services filtered returned ${list_services_filtered_status}, expected 200"
 assert_contains "$list_services_filtered_body" '"structuredContent"' "tools/call list_services filtered did not return structuredContent"
 
+echo "[smoke] checking POST /mcp tools/call list_services with unit_name_prefix filter"
+list_services_prefix_filtered_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":124,"method":"tools/call","params":{"name":"list_services","arguments":{"unit_name_prefix":"ssh"}}}' \
+  "${BASE_URL}/mcp")"
+list_services_prefix_filtered_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":124,"method":"tools/call","params":{"name":"list_services","arguments":{"unit_name_prefix":"ssh"}}}' \
+  "${BASE_URL}/mcp")"
+[[ "$list_services_prefix_filtered_status" == "200" ]] || fail "tools/call list_services prefix filtered returned ${list_services_prefix_filtered_status}, expected 200"
+assert_contains "$list_services_prefix_filtered_body" '"structuredContent"' "tools/call list_services prefix filtered did not return structuredContent"
+
 echo "[smoke] checking POST /mcp tools/call list_services invalid state"
 list_services_invalid_state_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \

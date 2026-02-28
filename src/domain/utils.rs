@@ -74,30 +74,47 @@ pub fn normalize_priority(priority: Option<String>) -> Result<Option<String>, Ap
     Ok(Some(mapped.to_string()))
 }
 
-pub fn normalize_unit(unit: Option<String>) -> Result<Option<String>, AppError> {
-    let Some(value) = unit else {
-        return Ok(None);
-    };
-
-    let normalized = value.trim();
-    if normalized.is_empty() {
-        return Err(AppError::bad_request(
-            "invalid_unit",
-            "unit must contain only alphanumeric characters, dashes, underscores, dots, @, and :",
-        ));
-    }
-
-    if !normalized.chars().all(|character| {
+fn is_valid_unit_name_chars(s: &str) -> bool {
+    s.chars().all(|character| {
         character.is_ascii_alphanumeric()
             || character == '-'
             || character == '_'
             || character == '@'
             || character == ':'
             || character == '.'
-    }) {
+    })
+}
+
+pub fn normalize_unit(unit: Option<String>) -> Result<Option<String>, AppError> {
+    let Some(value) = unit else {
+        return Ok(None);
+    };
+
+    let normalized = value.trim();
+    if normalized.is_empty() || !is_valid_unit_name_chars(normalized) {
         return Err(AppError::bad_request(
             "invalid_unit",
             "unit must contain only alphanumeric characters, dashes, underscores, dots, @, and :",
+        ));
+    }
+
+    Ok(Some(normalized.to_string()))
+}
+
+pub fn normalize_unit_name_prefix(prefix: Option<String>) -> Result<Option<String>, AppError> {
+    let Some(value) = prefix else {
+        return Ok(None);
+    };
+
+    let normalized = value.trim();
+    if normalized.is_empty() {
+        return Ok(None);
+    }
+
+    if !is_valid_unit_name_chars(normalized) {
+        return Err(AppError::bad_request(
+            "invalid_unit_name_prefix",
+            "unit_name_prefix must contain only alphanumeric characters, dashes, underscores, dots, @, and :",
         ));
     }
 
@@ -138,9 +155,26 @@ pub fn filter_services_by_state(services: Vec<UnitStatus>, state: Option<&str>) 
         .collect()
 }
 
+pub fn filter_services_by_unit_name_prefix(
+    services: Vec<UnitStatus>,
+    unit_name_prefix: Option<&str>,
+) -> Vec<UnitStatus> {
+    let Some(unit_name_prefix) = unit_name_prefix else {
+        return services;
+    };
+
+    services
+        .into_iter()
+        .filter(|service| service.name.starts_with(unit_name_prefix))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{filter_services_by_state, normalize_service_state};
+    use super::{
+        filter_services_by_state, filter_services_by_unit_name_prefix, normalize_service_state,
+        normalize_unit_name_prefix,
+    };
     use crate::systemd_client::UnitStatus;
 
     #[test]
@@ -172,6 +206,46 @@ mod tests {
         ];
 
         let filtered = filter_services_by_state(services, Some("FaIlEd"));
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "b.service");
+    }
+
+    #[test]
+    fn normalizes_unit_name_prefix() {
+        let prefix =
+            normalize_unit_name_prefix(Some("  sshd@prod ".to_string())).expect("valid prefix");
+        assert_eq!(prefix.as_deref(), Some("sshd@prod"));
+    }
+
+    #[test]
+    fn rejects_unit_name_prefix_with_disallowed_characters() {
+        let prefix = normalize_unit_name_prefix(Some("sshd/prod".to_string()));
+        let error = prefix.expect_err("expected invalid unit name prefix");
+        assert!(error.to_string().contains("bad request"));
+    }
+
+    #[test]
+    fn empty_unit_name_prefix_treated_as_none() {
+        let prefix = normalize_unit_name_prefix(Some("   ".to_string())).expect("valid prefix");
+        assert_eq!(prefix, None);
+    }
+
+    #[test]
+    fn filters_services_by_unit_name_prefix() {
+        let services = vec![
+            UnitStatus {
+                name: "a.service".to_string(),
+                state: "active".to_string(),
+                description: None,
+            },
+            UnitStatus {
+                name: "b.service".to_string(),
+                state: "failed".to_string(),
+                description: None,
+            },
+        ];
+
+        let filtered = filter_services_by_unit_name_prefix(services, Some("b."));
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "b.service");
     }

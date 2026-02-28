@@ -41,6 +41,9 @@
 - `list_services` with `state=failed` returns only services where `state` is `failed`.
 - `list_services` with mixed-case state input (for example `FaIlEd`) applies a case-insensitive match.
 - `list_services` with unsupported `state` value returns JSON-RPC error `-32602` with stable error code `invalid_state`.
+- `list_services` with `unit_name_prefix=ssh` returns only services whose names start with `ssh`.
+- `list_services` with both `state` and `unit_name_prefix` applies both filters.
+- `list_services` with disallowed `unit_name_prefix` characters (for example `/`) returns JSON-RPC error `-32602` with stable error code `invalid_unit_name_prefix`.
 
 ### Tool: `list_logs`
 
