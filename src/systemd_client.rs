@@ -5,6 +5,7 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
+use regex::Regex;
 use serde::Serialize;
 use std::collections::HashMap;
 use systemd::{daemon, journal};
@@ -32,18 +33,35 @@ pub struct UnitStatus {
 pub struct LogQuery {
     pub priority: Option<String>,
     pub unit: Option<String>,
+    pub exclude_units: Vec<String>,
+    pub grep: Option<String>,
+    pub order: LogOrder,
     pub start_utc: Option<DateTime<Utc>>,
     pub end_utc: Option<DateTime<Utc>>,
     pub limit: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogOrder {
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LogQueryResult {
+    pub entries: Vec<JournalLogEntry>,
+    pub total_scanned: Option<usize>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct JournalLogEntry {
     pub timestamp_utc: String,
-    pub timestamp_unix_usec: i64,
     pub unit: Option<String>,
-    pub priority: Option<u8>,
+    pub priority: Option<String>,
+    pub hostname: Option<String>,
+    pub pid: Option<i32>,
     pub message: Option<String>,
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -123,7 +141,7 @@ pub async fn ensure_systemd_available() -> Result<(), SystemdAvailabilityError> 
 #[async_trait]
 pub trait UnitProvider: Send + Sync {
     async fn list_service_units(&self) -> Result<Vec<UnitStatus>, AppError>;
-    async fn list_journal_logs(&self, query: &LogQuery) -> Result<Vec<JournalLogEntry>, AppError>;
+    async fn list_journal_logs(&self, query: &LogQuery) -> Result<LogQueryResult, AppError>;
 }
 
 #[derive(Debug, Default)]
@@ -216,7 +234,7 @@ impl UnitProvider for DbusSystemdClient {
         Ok(units)
     }
 
-    async fn list_journal_logs(&self, query: &LogQuery) -> Result<Vec<JournalLogEntry>, AppError> {
+    async fn list_journal_logs(&self, query: &LogQuery) -> Result<LogQueryResult, AppError> {
         let query = query.clone();
         tokio::task::spawn_blocking(move || read_journal_logs(&query))
             .await
@@ -366,10 +384,75 @@ fn format_systemd_timestamp_usec(timestamp_usec: u64) -> Option<String> {
         .map(|timestamp| timestamp.to_rfc3339_opts(SecondsFormat::Millis, true))
 }
 
-fn read_journal_logs(query: &LogQuery) -> Result<Vec<JournalLogEntry>, AppError> {
+#[derive(Debug)]
+enum GrepMatcher {
+    Substring(String),
+    Regex(Regex),
+}
+
+fn build_grep_matcher(grep: Option<&str>) -> Result<Option<GrepMatcher>, AppError> {
+    let Some(grep) = grep else {
+        return Ok(None);
+    };
+
+    let trimmed = grep.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    if trimmed.len() >= 2 && trimmed.starts_with('/') && trimmed.ends_with('/') {
+        let pattern = &trimmed[1..trimmed.len() - 1];
+        let regex = Regex::new(pattern)
+            .map_err(|_| AppError::bad_request("invalid_grep", "grep regex pattern is invalid"))?;
+        return Ok(Some(GrepMatcher::Regex(regex)));
+    }
+
+    Ok(Some(GrepMatcher::Substring(trimmed.to_string())))
+}
+
+fn matches_grep(matcher: &Option<GrepMatcher>, message: &str) -> bool {
+    let Some(matcher) = matcher else {
+        return true;
+    };
+
+    match matcher {
+        GrepMatcher::Substring(value) => message.contains(value),
+        GrepMatcher::Regex(regex) => regex.is_match(message),
+    }
+}
+
+fn sanitize_log_message(message: Option<String>) -> Option<String> {
+    message.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let sanitized: String = trimmed
+            .chars()
+            .map(|character| {
+                if character.is_control()
+                    && character != '\n'
+                    && character != '\r'
+                    && character != '\t'
+                {
+                    ' '
+                } else {
+                    character
+                }
+            })
+            .collect();
+
+        Some(sanitized)
+    })
+}
+
+fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
     let mut reader = journal::OpenOptions::default()
         .open()
         .map_err(|err| AppError::internal(format!("failed to open journald reader: {err}")))?;
+
+    let grep_matcher = build_grep_matcher(query.grep.as_deref())?;
 
     if let Some(unit) = &query.unit {
         reader
@@ -377,39 +460,65 @@ fn read_journal_logs(query: &LogQuery) -> Result<Vec<JournalLogEntry>, AppError>
             .map_err(|err| AppError::internal(format!("failed to apply unit filter: {err}")))?;
     }
 
-    if let Some(end_utc) = query.end_utc {
-        let end_unix_usec = end_utc.timestamp_micros();
-        if let Ok(end_unix_usec) = u64::try_from(end_unix_usec) {
-            reader.seek_realtime_usec(end_unix_usec).map_err(|err| {
-                AppError::internal(format!("failed to seek journald end timestamp: {err}"))
-            })?;
-        } else {
-            reader.seek_head().map_err(|err| {
-                AppError::internal(format!("failed to seek journald head: {err}"))
-            })?;
+    let Some(start_utc) = query.start_utc else {
+        return Err(AppError::internal("start_utc must be set".to_string()));
+    };
+    let Some(end_utc) = query.end_utc else {
+        return Err(AppError::internal("end_utc must be set".to_string()));
+    };
+
+    match query.order {
+        LogOrder::Desc => {
+            let end_unix_usec = end_utc.timestamp_micros();
+            if let Ok(end_unix_usec) = u64::try_from(end_unix_usec) {
+                reader.seek_realtime_usec(end_unix_usec).map_err(|err| {
+                    AppError::internal(format!("failed to seek journald end timestamp: {err}"))
+                })?;
+            } else {
+                reader.seek_tail().map_err(|err| {
+                    AppError::internal(format!("failed to seek journald tail: {err}"))
+                })?;
+            }
         }
-    } else {
-        reader
-            .seek_tail()
-            .map_err(|err| AppError::internal(format!("failed to seek journald tail: {err}")))?;
+        LogOrder::Asc => {
+            let start_unix_usec = start_utc.timestamp_micros();
+            if let Ok(start_unix_usec) = u64::try_from(start_unix_usec) {
+                reader.seek_realtime_usec(start_unix_usec).map_err(|err| {
+                    AppError::internal(format!("failed to seek journald start timestamp: {err}"))
+                })?;
+            } else {
+                reader.seek_head().map_err(|err| {
+                    AppError::internal(format!("failed to seek journald head: {err}"))
+                })?;
+            }
+        }
     }
 
     let threshold = query
         .priority
         .as_deref()
         .and_then(|value| value.parse::<u8>().ok());
-    let start_unix_usec = query.start_utc.map(|value| value.timestamp_micros());
-    let end_unix_usec = query.end_utc.map(|value| value.timestamp_micros());
+    let start_unix_usec = start_utc.timestamp_micros();
+    let end_unix_usec = end_utc.timestamp_micros();
 
     let mut entries = Vec::new();
+    let mut total_scanned = 0usize;
 
-    while entries.len() < query.limit {
-        let advanced = reader
-            .previous()
-            .map_err(|err| AppError::internal(format!("failed to read journald entry: {err}")))?;
+    loop {
+        if entries.len() >= query.limit {
+            break;
+        }
+
+        let advanced = match query.order {
+            LogOrder::Desc => reader.previous(),
+            LogOrder::Asc => reader.next(),
+        }
+        .map_err(|err| AppError::internal(format!("failed to read journald entry: {err}")))?;
+
         if advanced == 0 {
             break;
         }
+        total_scanned += 1;
 
         let timestamp_unix_usec_u64 = reader.timestamp_usec().map_err(|err| {
             AppError::internal(format!("failed to read journald timestamp: {err}"))
@@ -418,14 +527,27 @@ fn read_journal_logs(query: &LogQuery) -> Result<Vec<JournalLogEntry>, AppError>
             continue;
         };
 
-        if let Some(start) = start_unix_usec {
-            if timestamp_unix_usec < start {
+        if timestamp_unix_usec < start_unix_usec {
+            if query.order == LogOrder::Desc {
                 break;
             }
+            continue;
         }
 
-        if let Some(end) = end_unix_usec {
-            if timestamp_unix_usec > end {
+        if timestamp_unix_usec > end_unix_usec {
+            if query.order == LogOrder::Asc {
+                break;
+            }
+            continue;
+        }
+
+        let unit = read_journal_field(&mut reader, "_SYSTEMD_UNIT")?;
+        if let Some(unit) = unit.as_deref() {
+            if query
+                .exclude_units
+                .iter()
+                .any(|excluded| excluded.eq_ignore_ascii_case(unit))
+            {
                 continue;
             }
         }
@@ -445,19 +567,34 @@ fn read_journal_logs(query: &LogQuery) -> Result<Vec<JournalLogEntry>, AppError>
         }
 
         let timestamp_utc = timestamp.to_rfc3339_opts(SecondsFormat::Millis, true);
-        let unit = read_journal_field(&mut reader, "_SYSTEMD_UNIT")?;
-        let message = read_journal_field(&mut reader, "MESSAGE")?;
+        let hostname = read_journal_field(&mut reader, "_HOSTNAME")?;
+        let pid =
+            read_journal_field(&mut reader, "_PID")?.and_then(|value| value.parse::<i32>().ok());
+        let message = sanitize_log_message(read_journal_field(&mut reader, "MESSAGE")?);
+        if let Some(message) = message.as_deref() {
+            if !matches_grep(&grep_matcher, message) {
+                continue;
+            }
+        } else if query.grep.is_some() {
+            continue;
+        }
+        let cursor = reader.cursor().ok();
 
         entries.push(JournalLogEntry {
             timestamp_utc,
-            timestamp_unix_usec,
             unit,
-            priority,
+            priority: priority.map(|value| value.to_string()),
+            hostname,
+            pid,
             message,
+            cursor,
         });
     }
 
-    Ok(entries)
+    Ok(LogQueryResult {
+        entries,
+        total_scanned: Some(total_scanned),
+    })
 }
 
 fn read_journal_field(
@@ -533,13 +670,15 @@ mod tests {
     fn journal_log_entry_keeps_expected_shape() {
         let sample = JournalLogEntry {
             timestamp_utc: "2025-01-01T00:00:00.000Z".to_string(),
-            timestamp_unix_usec: 1_735_689_600_000_000,
             unit: Some("ssh.service".to_string()),
-            priority: Some(6),
+            priority: Some("6".to_string()),
+            hostname: Some("host-a".to_string()),
+            pid: Some(1234),
             message: Some("Started OpenSSH server".to_string()),
+            cursor: Some("s=abc;i=12".to_string()),
         };
 
         assert_eq!(sample.unit.as_deref(), Some("ssh.service"));
-        assert_eq!(sample.priority, Some(6));
+        assert_eq!(sample.priority.as_deref(), Some("6"));
     }
 }

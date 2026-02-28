@@ -4,6 +4,7 @@
 //! the `UnitProvider` systemd implementation dynamically.
 
 use chrono::{SecondsFormat, Utc};
+use regex::Regex;
 use rust_mcp_sdk::{
     macros,
     schema::{CallToolRequestParams, CallToolResult, ContentBlock, TextContent, Tool},
@@ -19,7 +20,11 @@ use crate::domain::utils::{
 use crate::mcp::rpc::{
     app_error_to_json_rpc, json_rpc_error, json_rpc_error_with_data, json_rpc_result,
 };
-use crate::{errors::AppError, systemd_client::LogQuery, AppState};
+use crate::{
+    errors::AppError,
+    systemd_client::{LogOrder, LogQuery},
+    AppState,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct ServicesQueryParams {
@@ -34,7 +39,11 @@ pub struct LogsQueryParams {
     pub unit: Option<String>,
     pub start_utc: Option<String>,
     pub end_utc: Option<String>,
-    pub limit: Option<usize>,
+    pub grep: Option<String>,
+    pub exclude_units: Option<Vec<String>>,
+    pub order: Option<String>,
+    pub allow_large_window: Option<bool>,
+    pub limit: Option<u32>,
 }
 
 #[macros::mcp_tool(
@@ -58,6 +67,10 @@ pub struct ListLogsTool {
     pub unit: Option<String>,
     pub start_utc: String,
     pub end_utc: String,
+    pub grep: Option<String>,
+    pub exclude_units: Option<Vec<String>>,
+    pub order: Option<String>,
+    pub allow_large_window: Option<bool>,
     pub limit: Option<u32>,
 }
 
@@ -77,28 +90,85 @@ pub fn build_log_query(params: LogsQueryParams) -> Result<LogQuery, AppError> {
     }
 
     if let (Some(start), Some(end)) = (start_utc.as_ref(), end_utc.as_ref()) {
-        if start > end {
+        if start >= end {
             return Err(AppError::bad_request(
                 "invalid_time_range",
-                "start_utc must be less than or equal to end_utc",
+                "start_utc must be strictly less than end_utc",
+            ));
+        }
+
+        let allow_large_window = params.allow_large_window.unwrap_or(false);
+        let seven_days = chrono::Duration::days(7);
+        if !allow_large_window && (*end - *start) > seven_days {
+            return Err(AppError::bad_request(
+                "time_range_too_large",
+                "time window must not exceed 7 days unless allow_large_window is true",
             ));
         }
     }
 
-    let limit = params.limit.unwrap_or(DEFAULT_LOG_LIMIT);
-    if limit == 0 || limit > MAX_LOG_LIMIT {
+    let limit = params.limit.unwrap_or(DEFAULT_LOG_LIMIT as u32);
+    if limit == 0 || limit > MAX_LOG_LIMIT as u32 {
         return Err(AppError::bad_request(
             "invalid_limit",
             "limit must be between 1 and 1000",
         ));
     }
 
+    let order = match params
+        .order
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        None | Some("desc") => LogOrder::Desc,
+        Some("asc") => LogOrder::Asc,
+        _ => {
+            return Err(AppError::bad_request(
+                "invalid_order",
+                "order must be one of: asc, desc",
+            ))
+        }
+    };
+
+    if let Some(grep) = params
+        .grep
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if grep.len() >= 2 && grep.starts_with('/') && grep.ends_with('/') {
+            let pattern = &grep[1..grep.len() - 1];
+            Regex::new(pattern).map_err(|_| {
+                AppError::bad_request("invalid_grep", "grep regex pattern is invalid")
+            })?;
+        }
+    }
+
+    let exclude_units = params
+        .exclude_units
+        .unwrap_or_default()
+        .into_iter()
+        .map(|unit| normalize_unit(Some(unit)))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+
     Ok(LogQuery {
         priority: normalize_priority(params.priority)?,
         unit: normalize_unit(params.unit)?,
+        exclude_units,
+        grep: params
+            .grep
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        order,
         start_utc,
         end_utc,
-        limit,
+        limit: limit as usize,
     })
 }
 
@@ -186,23 +256,49 @@ pub async fn handle_tools_call(
             };
 
             match state.unit_provider.list_journal_logs(&query).await {
-                Ok(logs) => json_rpc_result(
-                    id,
-                    serde_json::to_value(CallToolResult {
-                        content: vec![ContentBlock::from(TextContent::new(
-                            format!("Returned {} log entries", logs.len()),
-                            None,
-                            None,
-                        ))],
-                        is_error: None,
-                        meta: None,
-                        structured_content: Some(serde_json::Map::from_iter([(
-                            "logs".to_string(),
-                            json!(logs),
-                        )])),
-                    })
-                    .expect("list_logs tool result serialization"),
-                ),
+                Ok(log_result) => {
+                    let returned = log_result.entries.len();
+                    let truncated = returned >= query.limit;
+                    let generated_at_utc = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+                    let window = serde_json::Map::from_iter([
+                        (
+                            "start_utc".to_string(),
+                            json!(query
+                                .start_utc
+                                .expect("validated start_utc")
+                                .to_rfc3339_opts(SecondsFormat::Millis, true)),
+                        ),
+                        (
+                            "end_utc".to_string(),
+                            json!(query
+                                .end_utc
+                                .expect("validated end_utc")
+                                .to_rfc3339_opts(SecondsFormat::Millis, true)),
+                        ),
+                    ]);
+
+                    json_rpc_result(
+                        id,
+                        serde_json::to_value(CallToolResult {
+                            content: vec![ContentBlock::from(TextContent::new(
+                                format!("Returned {returned} log entries"),
+                                None,
+                                None,
+                            ))],
+                            is_error: None,
+                            meta: None,
+                            structured_content: Some(serde_json::Map::from_iter([
+                                ("logs".to_string(), json!(log_result.entries)),
+                                ("total_scanned".to_string(), json!(log_result.total_scanned)),
+                                ("returned".to_string(), json!(returned)),
+                                ("truncated".to_string(), json!(truncated)),
+                                ("generated_at_utc".to_string(), json!(generated_at_utc)),
+                                ("window".to_string(), Value::Object(window)),
+                            ])),
+                        })
+                        .expect("list_logs tool result serialization"),
+                    )
+                }
                 Err(err) => app_error_to_json_rpc(id, err),
             }
         }
@@ -233,7 +329,11 @@ mod tests {
             unit: None,
             start_utc: None,
             end_utc: None,
-            limit: Some(MAX_LOG_LIMIT + 1),
+            grep: None,
+            exclude_units: None,
+            order: None,
+            allow_large_window: None,
+            limit: Some((MAX_LOG_LIMIT + 1) as u32),
         });
 
         let error = query.expect_err("expected invalid limit");
@@ -247,6 +347,10 @@ mod tests {
             unit: None,
             start_utc: Some("2026-02-27T12:00:00+01:00".to_string()),
             end_utc: Some("2026-02-27T13:00:00Z".to_string()),
+            grep: None,
+            exclude_units: None,
+            order: None,
+            allow_large_window: None,
             limit: Some(10),
         });
 
@@ -261,6 +365,10 @@ mod tests {
             unit: Some("ssh_service-01@host:prod".to_string()),
             start_utc: Some("2026-02-27T00:00:00Z".to_string()),
             end_utc: Some("2026-02-27T01:00:00Z".to_string()),
+            grep: None,
+            exclude_units: None,
+            order: None,
+            allow_large_window: None,
             limit: Some(10),
         })
         .expect("query should build");
@@ -276,6 +384,10 @@ mod tests {
             unit: Some("sshd/service".to_string()),
             start_utc: Some("2026-02-27T00:00:00Z".to_string()),
             end_utc: Some("2026-02-27T01:00:00Z".to_string()),
+            grep: None,
+            exclude_units: None,
+            order: None,
+            allow_large_window: None,
             limit: Some(10),
         });
 
@@ -290,10 +402,32 @@ mod tests {
             unit: None,
             start_utc: None,
             end_utc: None,
+            grep: None,
+            exclude_units: None,
+            order: None,
+            allow_large_window: None,
             limit: Some(10),
         });
 
         let error = query.expect_err("expected missing time range");
+        assert!(error.to_string().contains("bad request"));
+    }
+
+    #[test]
+    fn rejects_too_large_time_range_without_override() {
+        let query = build_log_query(LogsQueryParams {
+            priority: None,
+            unit: None,
+            start_utc: Some("2026-02-01T00:00:00Z".to_string()),
+            end_utc: Some("2026-02-10T00:00:00Z".to_string()),
+            grep: None,
+            exclude_units: None,
+            order: None,
+            allow_large_window: None,
+            limit: Some(10),
+        });
+
+        let error = query.expect_err("expected too large range");
         assert!(error.to_string().contains("bad request"));
     }
 }
