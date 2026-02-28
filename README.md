@@ -7,6 +7,7 @@ MCP server for monitoring a Linux server over JSON-RPC.
 - `GET /health` public health endpoint.
 - `GET /.well-known/mcp` public MCP discovery endpoint.
 - `POST /mcp` MCP JSON-RPC endpoint (bearer-token protected).
+- `initialize` accepts modern protocol versions (including `2025-03-26`) and negotiates gracefully.
 - MCP tools: `list_services`, `list_logs`.
 - MCP resources: `resource://services/snapshot`, `resource://services/failed`, `resource://logs/recent`.
 - Bearer-token authentication using `MCP_API_TOKEN`.
@@ -49,7 +50,7 @@ curl -s http://127.0.0.1:8080/health
 curl -s \
 	-H "Content-Type: application/json" \
 	-H "Authorization: Bearer $MCP_API_TOKEN" \
-	-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"example-client","version":"1.0.0"},"capabilities":{}}}' \
+	-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"example-client","version":"1.0.0"},"capabilities":{}}}' \
 	http://127.0.0.1:8080/mcp
 ```
 

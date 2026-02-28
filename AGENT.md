@@ -79,7 +79,7 @@ Copy-paste one-liner:
   - `export BIND_PORT="8080"`
 - Smoke checks:
   - `curl -s http://127.0.0.1:8080/health`
-  - `curl -s -H "Authorization: Bearer change-me" -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"example-client","version":"1.0.0"},"capabilities":{}}}' http://127.0.0.1:8080/mcp`
+  - `curl -s -H "Authorization: Bearer change-me" -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"example-client","version":"1.0.0"},"capabilities":{}}}' http://127.0.0.1:8080/mcp`
   - `curl -s -H "Authorization: Bearer change-me" -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' http://127.0.0.1:8080/mcp`
 
 ## Implementation Notes
