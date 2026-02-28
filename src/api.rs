@@ -796,8 +796,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        build_log_query, filter_services_by_state, normalize_service_state, LogsQueryParams,
-        redact_audit_params, MAX_LOG_LIMIT,
+        build_log_query, filter_services_by_state, normalize_service_state, redact_audit_params,
+        LogsQueryParams, MAX_LOG_LIMIT,
     };
 
     #[test]
