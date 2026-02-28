@@ -1,3 +1,8 @@
+//! Systemd D-Bus and Journald host integrations
+//!
+//! Provides the raw connection primitives into the host OS Systemd bindings over dbus.
+//! Includes systemd unit representations, log querying semantics, and mocked providers.
+
 use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
