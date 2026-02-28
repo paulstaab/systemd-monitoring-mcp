@@ -755,7 +755,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_resources_read_unknown_uri_returns_method_not_found() {
+    async fn mcp_resources_read_unknown_uri_returns_resource_not_found_data() {
         let response = app()
             .oneshot(
                 Request::builder()
