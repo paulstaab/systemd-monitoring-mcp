@@ -71,3 +71,5 @@
 - Internal tool execution failures return opaque client-facing errors (no raw system diagnostics in JSON-RPC error message/data).
 - HTTP non-2xx errors retain `{ code, message, details }` JSON shape.
 - Startup and request logs include method/path/status/duration and authentication failures, without exposing token values.
+- Every action executed through the MCP server emits an INFO-level audit log event.
+- Audit log events include action parameters with sensitive fields redacted (for example token, password, secret, credentials).

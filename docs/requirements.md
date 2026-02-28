@@ -155,6 +155,7 @@ Minimum required logs:
 - Startup logs including effective bind address/port.
 - Authentication failure logs for rejected MCP requests.
 - Request summary logs (method, path, status, duration).
+- MCP action audit logs at INFO level for handled MCP methods, including method name, redacted params, and outcome (`success` or `failure`).
 - MCP method-level failure logs with stable error identifiers.
 
 Sensitive data handling:
