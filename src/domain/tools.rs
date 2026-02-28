@@ -25,7 +25,7 @@ use crate::{errors::AppError, systemd_client::LogQuery, AppState};
 pub struct ServicesQueryParams {
     pub state: Option<String>,
     pub name_contains: Option<String>,
-    pub limit: Option<usize>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,6 +139,9 @@ pub async fn handle_tools_call(
                     services = filter_services_by_state(services, state_filter.as_deref());
                     services =
                         filter_services_by_name_contains(services, name_contains_filter.as_deref());
+
+                    let failed_first = state_filter.as_deref() == Some("failed");
+                    sort_services(&mut services, failed_first);
 
                     let total = services.len();
                     let services = services.into_iter().take(limit).collect::<Vec<_>>();

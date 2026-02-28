@@ -137,16 +137,16 @@ pub fn normalize_service_state(state: Option<String>) -> Result<Option<String>, 
     Ok(Some(normalized))
 }
 
-pub fn normalize_services_limit(limit: Option<usize>) -> Result<usize, AppError> {
-    let limit = limit.unwrap_or(DEFAULT_SERVICES_LIMIT);
-    if limit == 0 || limit > MAX_SERVICES_LIMIT {
+pub fn normalize_services_limit(limit: Option<u32>) -> Result<usize, AppError> {
+    let limit = limit.unwrap_or(DEFAULT_SERVICES_LIMIT as u32);
+    if limit == 0 || limit > MAX_SERVICES_LIMIT as u32 {
         return Err(AppError::bad_request(
             "invalid_limit",
             "limit must be between 1 and 1000",
         ));
     }
 
-    Ok(limit)
+    Ok(limit as usize)
 }
 
 pub fn filter_services_by_state(services: Vec<UnitStatus>, state: Option<&str>) -> Vec<UnitStatus> {

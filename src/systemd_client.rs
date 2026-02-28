@@ -9,6 +9,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use systemd::{daemon, journal};
 use thiserror::Error;
+use tracing::warn;
 use zbus::{zvariant::OwnedObjectPath, Connection, Proxy};
 
 use crate::errors::AppError;
@@ -193,12 +194,23 @@ impl UnitProvider for DbusSystemdClient {
                 continue;
             };
 
-            let details = fetch_service_details(&connection, unit_path).await;
-            unit.unit_file_state = details.unit_file_state;
-            unit.since_utc = details.since_utc;
-            unit.main_pid = details.main_pid;
-            unit.exec_main_status = details.exec_main_status;
-            unit.result = details.result;
+            match fetch_service_details(&connection, unit_path).await {
+                Ok(details) => {
+                    unit.unit_file_state = details.unit_file_state;
+                    unit.since_utc = details.since_utc;
+                    unit.main_pid = details.main_pid;
+                    unit.exec_main_status = details.exec_main_status;
+                    unit.result = details.result;
+                }
+                Err(err) => {
+                    warn!(
+                        unit = %unit.unit,
+                        unit_path = %unit_path.as_str(),
+                        error = %err,
+                        "failed to enrich service details from systemd"
+                    );
+                }
+            }
         }
 
         Ok(units)
@@ -239,26 +251,25 @@ fn map_and_sort_service_units(raw_units: Vec<RawUnit>) -> Vec<UnitStatus> {
 async fn fetch_service_details(
     connection: &Connection,
     unit_path: &OwnedObjectPath,
-) -> ServiceDetails {
+) -> Result<ServiceDetails, AppError> {
     let unit_proxy = Proxy::new(
         connection,
         "org.freedesktop.systemd1",
         unit_path,
         "org.freedesktop.systemd1.Unit",
     )
-    .await;
+    .await
+    .map_err(|err| {
+        AppError::internal(format!(
+            "failed to create systemd unit proxy for {}: {err}",
+            unit_path.as_str()
+        ))
+    })?;
 
-    let unit_file_state = match &unit_proxy {
-        Ok(proxy) => try_get_string_property(proxy, "UnitFileState").await,
-        Err(_) => None,
-    };
-
-    let since_utc = match &unit_proxy {
-        Ok(proxy) => try_get_u64_property(proxy, "ActiveEnterTimestamp")
-            .await
-            .and_then(format_systemd_timestamp_usec),
-        Err(_) => None,
-    };
+    let unit_file_state = try_get_string_property(&unit_proxy, "UnitFileState").await?;
+    let since_utc = try_get_u64_property(&unit_proxy, "ActiveEnterTimestamp")
+        .await?
+        .and_then(format_systemd_timestamp_usec);
 
     let service_proxy = Proxy::new(
         connection,
@@ -266,56 +277,82 @@ async fn fetch_service_details(
         unit_path,
         "org.freedesktop.systemd1.Service",
     )
-    .await;
+    .await
+    .map_err(|err| {
+        AppError::internal(format!(
+            "failed to create systemd service proxy for {}: {err}",
+            unit_path.as_str()
+        ))
+    })?;
 
-    let main_pid = match &service_proxy {
-        Ok(proxy) => try_get_u32_property(proxy, "MainPID")
-            .await
-            .filter(|value| *value > 0),
-        Err(_) => None,
-    };
+    let main_pid = try_get_u32_property(&service_proxy, "MainPID")
+        .await?
+        .filter(|value| *value > 0);
 
-    let exec_main_status = match &service_proxy {
-        Ok(proxy) => try_get_u32_property(proxy, "ExecMainStatus")
-            .await
-            .and_then(|value| i32::try_from(value).ok()),
-        Err(_) => None,
-    };
+    let exec_main_status = try_get_u32_property(&service_proxy, "ExecMainStatus")
+        .await?
+        .and_then(|value| i32::try_from(value).ok());
 
-    let result = match &service_proxy {
-        Ok(proxy) => try_get_string_property(proxy, "Result").await,
-        Err(_) => None,
-    };
+    let result = try_get_string_property(&service_proxy, "Result").await?;
 
-    ServiceDetails {
+    Ok(ServiceDetails {
         unit_file_state,
         since_utc,
         main_pid,
         exec_main_status,
         result,
-    }
+    })
 }
 
-async fn try_get_string_property(proxy: &Proxy<'_>, property_name: &str) -> Option<String> {
+async fn try_get_string_property(
+    proxy: &Proxy<'_>,
+    property_name: &str,
+) -> Result<Option<String>, AppError> {
     proxy
         .get_property::<String>(property_name)
         .await
-        .ok()
-        .and_then(|value| {
+        .map(|value| {
             if value.trim().is_empty() {
                 None
             } else {
                 Some(value)
             }
         })
+        .map_err(|err| {
+            AppError::internal(format!(
+                "failed to read systemd property {property_name}: {err}"
+            ))
+        })
 }
 
-async fn try_get_u64_property(proxy: &Proxy<'_>, property_name: &str) -> Option<u64> {
-    proxy.get_property::<u64>(property_name).await.ok()
+async fn try_get_u64_property(
+    proxy: &Proxy<'_>,
+    property_name: &str,
+) -> Result<Option<u64>, AppError> {
+    proxy
+        .get_property::<u64>(property_name)
+        .await
+        .map(Some)
+        .map_err(|err| {
+            AppError::internal(format!(
+                "failed to read systemd property {property_name}: {err}"
+            ))
+        })
 }
 
-async fn try_get_u32_property(proxy: &Proxy<'_>, property_name: &str) -> Option<u32> {
-    proxy.get_property::<u32>(property_name).await.ok()
+async fn try_get_u32_property(
+    proxy: &Proxy<'_>,
+    property_name: &str,
+) -> Result<Option<u32>, AppError> {
+    proxy
+        .get_property::<u32>(property_name)
+        .await
+        .map(Some)
+        .map_err(|err| {
+            AppError::internal(format!(
+                "failed to read systemd property {property_name}: {err}"
+            ))
+        })
 }
 
 fn format_systemd_timestamp_usec(timestamp_usec: u64) -> Option<String> {
