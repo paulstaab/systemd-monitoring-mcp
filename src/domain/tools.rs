@@ -140,9 +140,6 @@ pub async fn handle_tools_call(
                     services =
                         filter_services_by_name_contains(services, name_contains_filter.as_deref());
 
-                    let failed_first = state_filter.as_deref() == Some("failed");
-                    sort_services(&mut services, failed_first);
-
                     let total = services.len();
                     let services = services.into_iter().take(limit).collect::<Vec<_>>();
                     let returned = services.len();
