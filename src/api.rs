@@ -40,7 +40,7 @@ const VALID_SERVICE_STATES: [&str; 6] = [
 ];
 
 #[derive(Debug, Deserialize)]
-pub struct ServicesQueryParams {
+struct ServicesQueryParams {
     state: Option<String>,
 }
 
