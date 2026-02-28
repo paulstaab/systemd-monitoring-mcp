@@ -443,7 +443,12 @@ fn sanitize_log_message(message: Option<String>) -> Option<String> {
             })
             .collect();
 
-        Some(sanitized)
+        let sanitized_trimmed = sanitized.trim();
+        if sanitized_trimmed.is_empty() {
+            None
+        } else {
+            Some(sanitized_trimmed.to_string())
+        }
     })
 }
 
