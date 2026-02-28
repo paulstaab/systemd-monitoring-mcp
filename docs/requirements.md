@@ -21,15 +21,11 @@ The server must be configurable via environment variables:
 - `MCP_API_TOKEN` (required): static bearer token used for API authentication. Must be at least 16 characters long.
 - `BIND_ADDR` (optional): bind address, default `127.0.0.1`.
 - `BIND_PORT` (optional): bind port, default `8080`.
-- `MCP_ALLOWED_CIDR` (optional): CIDR range allowlist for incoming request source IPs.
-- `MCP_TRUSTED_PROXIES` (optional): comma-separated list of CIDR ranges identifying trusted reverse proxies. When set and the direct peer IP matches a trusted proxy, the client IP is extracted from the `X-Forwarded-For` header (leftmost entry).
 
 Startup behavior:
 - If `MCP_API_TOKEN` is missing or empty, server startup must fail with a clear error message.
 - If `MCP_API_TOKEN` is shorter than 16 characters, server startup must fail with a clear error message.
 - If optional bind values are missing, defaults must be applied.
-- If `MCP_ALLOWED_CIDR` is set but invalid, server startup must fail with a clear error message.
-- If `MCP_TRUSTED_PROXIES` is set but contains an invalid CIDR, server startup must fail with a clear error message.
 - If systemd is not available on the host/runtime environment, server startup must fail with a clear error message.
 
 ## 3. MCP Protocol Requirements
@@ -124,14 +120,6 @@ CORS:
 
 Input Validation:
 - All tool and resource input parameters must be strictly validated.
-
-Request source IP allowlist:
-- If `MCP_ALLOWED_CIDR` is not set, no source-IP filtering is applied.
-- If `MCP_ALLOWED_CIDR` is set, requests from source IPs outside the range must be rejected.
-- When `MCP_TRUSTED_PROXIES` is configured and the direct peer IP matches a trusted proxy CIDR, the client IP must be extracted from the leftmost entry of the `X-Forwarded-For` header.
-- If the direct peer is a trusted proxy but `X-Forwarded-For` is missing or contains an invalid client IP, the request must be rejected with `403 Forbidden`.
-- If the direct peer is not a trusted proxy, `X-Forwarded-For` must be ignored and the socket-level peer IP is used.
-- Rejected requests must return `403 Forbidden` with the standard JSON error shape.
 
 ## 5. Error Model
 

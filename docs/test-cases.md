@@ -5,11 +5,8 @@
 - `GET /health` returns `200` with `{ "status": "ok" }` and no sensitive fields.
 - `POST /mcp` without authorization header returns `401` with `missing_token` code.
 - `POST /mcp` with non-bearer auth scheme returns `401` with `invalid_token` code.
+- `POST /mcp` with malformed authorization header value (header present but unparsable) returns `401` with `invalid_token` code.
 - `POST /mcp` with invalid bearer token returns `401` with `invalid_token` code.
-- If `MCP_ALLOWED_CIDR` is configured, `POST /mcp` from outside range returns `403` with `ip_restricted` code.
-- If request comes from a trusted proxy and `X-Forwarded-For` is missing, request is rejected with `403` and `ip_restricted` code.
-- If request comes from a trusted proxy and `X-Forwarded-For` leftmost IP is invalid, request is rejected with `403` and `ip_restricted` code.
-- If request comes from an untrusted peer, `X-Forwarded-For` is ignored and peer socket IP is used for allowlist checks.
 
 ## MCP Discovery and Initialize
 
