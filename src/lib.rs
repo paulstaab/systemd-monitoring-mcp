@@ -7,11 +7,13 @@ use axum::{
 };
 use ipnet::IpNet;
 
-pub mod api;
 pub mod auth;
 pub mod config;
+pub mod domain;
 pub mod errors;
+pub mod http;
 pub mod logging;
+pub mod mcp;
 pub mod systemd_client;
 
 use systemd_client::UnitProvider;
@@ -42,15 +44,15 @@ impl AppState {
 
 pub fn build_app(state: AppState) -> Router {
     let protected = Router::new()
-        .route("/mcp", post(api::mcp_endpoint))
+        .route("/mcp", post(http::handlers::mcp_endpoint))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_bearer_token,
         ));
 
     Router::new()
-        .route("/health", get(api::health))
-        .route("/.well-known/mcp", get(api::discovery))
+        .route("/health", get(http::handlers::health))
+        .route("/.well-known/mcp", get(http::handlers::discovery))
         .merge(protected)
         .layer(middleware::from_fn_with_state(
             state.clone(),
