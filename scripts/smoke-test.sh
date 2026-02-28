@@ -265,15 +265,17 @@ echo "[smoke] checking POST /mcp tools/call list_logs"
 list_logs_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"2100-01-01T00:00:00Z","limit":10}}}' \
+  -d '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"list_logs","arguments":{"order":"desc","start_utc":"1970-01-01T00:00:00Z","end_utc":"1970-01-01T01:00:00Z","limit":10}}}' \
   "${BASE_URL}/mcp")"
 list_logs_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"2100-01-01T00:00:00Z","limit":10}}}' \
+  -d '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"list_logs","arguments":{"order":"desc","start_utc":"1970-01-01T00:00:00Z","end_utc":"1970-01-01T01:00:00Z","limit":10}}}' \
   "${BASE_URL}/mcp")"
 [[ "$list_logs_status" == "200" ]] || fail "tools/call list_logs returned ${list_logs_status}, expected 200"
 assert_contains "$list_logs_body" '"structuredContent"' "tools/call list_logs did not return structuredContent"
+assert_contains "$list_logs_body" '"total_scanned"' "tools/call list_logs did not include total_scanned metadata"
+assert_contains "$list_logs_body" '"window"' "tools/call list_logs did not include window metadata"
 
 echo "[smoke] checking POST /mcp tools/call list_services"
 list_services_body="$(curl -sS -X POST \
@@ -298,12 +300,12 @@ echo "[smoke] checking POST /mcp tools/call list_logs invalid limit"
 list_logs_invalid_limit_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"2100-01-01T00:00:00Z","limit":1001}}}' \
+  -d '{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"1970-01-01T01:00:00Z","limit":1001}}}' \
   "${BASE_URL}/mcp")"
 list_logs_invalid_limit_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"2100-01-01T00:00:00Z","limit":1001}}}' \
+  -d '{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"1970-01-01T01:00:00Z","limit":1001}}}' \
   "${BASE_URL}/mcp")"
 [[ "$list_logs_invalid_limit_status" == "200" ]] || fail "tools/call list_logs invalid limit returned ${list_logs_invalid_limit_status}, expected 200"
 assert_contains "$list_logs_invalid_limit_body" '"code":-32602' "tools/call list_logs invalid limit did not return invalid params error"

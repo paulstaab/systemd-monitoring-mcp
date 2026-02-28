@@ -51,16 +51,25 @@
 
 ### Tool: `list_logs`
 
-- `tools/call` for `list_logs` returns log entries in descending timestamp order (newest first).
+- `tools/call` for `list_logs` defaults to descending timestamp order (newest first).
+- `list_logs` with `order=asc` returns entries oldest-first within the requested window.
 - `list_logs` with `limit=0` returns JSON-RPC error `-32602` with stable error code `invalid_limit`.
 - `list_logs` with `limit=1001` returns JSON-RPC error `-32602` with stable error code `invalid_limit`.
 - `list_logs` with `priority=error` normalizes to journald priority `3` and applies minimum-threshold filtering.
 - `list_logs` with `priority=9` returns JSON-RPC error `-32602` with stable error code `invalid_priority`.
 - `list_logs` with `unit=sshd_service-01@host:prod` returns only matching unit entries.
 - `list_logs` with disallowed unit characters (for example `/`) returns JSON-RPC error `-32602` with stable error code `invalid_unit`.
+- `list_logs` with `exclude_units=["sshd.service"]` excludes matching unit entries.
+- `list_logs` with invalid `exclude_units` entry characters returns JSON-RPC error `-32602` with stable error code `invalid_unit`.
+- `list_logs` with `grep` as substring returns only matching message entries.
+- `list_logs` with `grep` regex-lite syntax (for example `/timeout|refused/`) applies regex filtering.
+- `list_logs` with invalid regex-lite `grep` returns JSON-RPC error `-32602` with stable error code `invalid_grep`.
 - `list_logs` with missing `start_utc` and/or `end_utc` returns JSON-RPC error `-32602` with stable error code `missing_time_range`.
-- `list_logs` with `start_utc > end_utc` returns JSON-RPC error `-32602` with stable error code `invalid_time_range`.
+- `list_logs` with `start_utc >= end_utc` returns JSON-RPC error `-32602` with stable error code `invalid_time_range`.
 - `list_logs` with non-UTC timestamp offset (`+01:00`) returns JSON-RPC error `-32602` with stable error code `invalid_utc_time`.
+- `list_logs` with a window larger than 7 days returns JSON-RPC error `-32602` with stable error code `time_range_too_large` unless `allow_large_window=true`.
+- Each log entry includes `timestamp_utc`, `unit`, `priority`, `hostname`, `pid`, `message`, and `cursor`.
+- `list_logs` structured output includes metadata: `total_scanned`, `returned`, `truncated`, `generated_at_utc`, and `window` object.
 
 ## MCP Resources
 

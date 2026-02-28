@@ -4,7 +4,7 @@ use crate::{errors::AppError, systemd_client::UnitStatus};
 use chrono::{DateTime, Utc};
 
 pub const MAX_LOG_LIMIT: usize = 1_000;
-pub const DEFAULT_LOG_LIMIT: usize = 100;
+pub const DEFAULT_LOG_LIMIT: usize = 200;
 pub const MAX_SERVICES_LIMIT: usize = 1_000;
 pub const DEFAULT_SERVICES_LIMIT: usize = 200;
 pub const VALID_SERVICE_STATES: [&str; 6] = [

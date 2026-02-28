@@ -115,14 +115,17 @@ pub async fn handle_resources_read(
             let query = LogQuery {
                 priority: None,
                 unit: None,
+                exclude_units: vec![],
+                grep: None,
+                order: crate::systemd_client::LogOrder::Desc,
                 start_utc: Some(start_utc),
                 end_utc: Some(end_utc),
                 limit: DEFAULT_LOG_LIMIT,
             };
 
             match state.unit_provider.list_journal_logs(&query).await {
-                Ok(logs) => {
-                    let structured_content = json!({ "logs": logs });
+                Ok(log_result) => {
+                    let structured_content = json!({ "logs": log_result.entries });
                     let result = serde_json::to_value(ReadResourceResult {
                         contents: vec![ReadResourceContent::from(TextResourceContents {
                             meta: None,

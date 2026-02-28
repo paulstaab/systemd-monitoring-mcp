@@ -59,7 +59,9 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    use crate::systemd_client::{JournalLogEntry, LogQuery, UnitProvider, UnitStatus};
+    use crate::systemd_client::{
+        JournalLogEntry, LogOrder, LogQuery, LogQueryResult, UnitProvider, UnitStatus,
+    };
 
     use super::*;
 
@@ -110,15 +112,67 @@ mod tests {
 
         async fn list_journal_logs(
             &self,
-            _query: &LogQuery,
-        ) -> Result<Vec<JournalLogEntry>, crate::errors::AppError> {
-            Ok(vec![JournalLogEntry {
-                timestamp_utc: "2026-02-27T00:00:00.000Z".to_string(),
-                timestamp_unix_usec: 1_772_150_400_000_000,
-                unit: Some("ssh.service".to_string()),
-                priority: Some(6),
-                message: Some("Started OpenSSH server".to_string()),
-            }])
+            query: &LogQuery,
+        ) -> Result<LogQueryResult, crate::errors::AppError> {
+            let mut entries = vec![
+                JournalLogEntry {
+                    timestamp_utc: "2026-02-27T00:00:00.000Z".to_string(),
+                    unit: Some("ssh.service".to_string()),
+                    priority: Some("6".to_string()),
+                    hostname: Some("test-host".to_string()),
+                    pid: Some(2222),
+                    message: Some("Started OpenSSH server".to_string()),
+                    cursor: Some("s=cursor;i=12".to_string()),
+                },
+                JournalLogEntry {
+                    timestamp_utc: "2026-02-27T00:30:00.000Z".to_string(),
+                    unit: Some("cron.service".to_string()),
+                    priority: Some("5".to_string()),
+                    hostname: Some("test-host".to_string()),
+                    pid: Some(3333),
+                    message: Some("Cron wake-up".to_string()),
+                    cursor: Some("s=cursor;i=13".to_string()),
+                },
+                JournalLogEntry {
+                    timestamp_utc: "2026-02-27T00:45:00.000Z".to_string(),
+                    unit: Some("app.service".to_string()),
+                    priority: Some("4".to_string()),
+                    hostname: Some("test-host".to_string()),
+                    pid: Some(4444),
+                    message: Some("Application warning".to_string()),
+                    cursor: Some("s=cursor;i=14".to_string()),
+                },
+            ];
+
+            let scanned = entries.len();
+
+            if let Some(unit_filter) = query.unit.as_deref() {
+                entries.retain(|entry| entry.unit.as_deref() == Some(unit_filter));
+            }
+
+            if !query.exclude_units.is_empty() {
+                entries.retain(|entry| {
+                    let Some(unit) = entry.unit.as_deref() else {
+                        return true;
+                    };
+                    !query
+                        .exclude_units
+                        .iter()
+                        .any(|excluded| excluded.eq_ignore_ascii_case(unit))
+                });
+            }
+
+            entries.sort_by(|left, right| left.timestamp_utc.cmp(&right.timestamp_utc));
+            if query.order == LogOrder::Desc {
+                entries.reverse();
+            }
+
+            entries.truncate(query.limit);
+
+            Ok(LogQueryResult {
+                entries,
+                total_scanned: Some(scanned),
+            })
         }
     }
 
@@ -657,6 +711,91 @@ mod tests {
         assert_eq!(body_json["jsonrpc"], "2.0");
         assert_eq!(body_json["id"], 31);
         assert!(body_json["result"]["structuredContent"]["logs"].is_array());
+        assert!(body_json["result"]["structuredContent"]["total_scanned"].is_number());
+        assert!(body_json["result"]["structuredContent"]["returned"].is_number());
+        assert!(body_json["result"]["structuredContent"]["truncated"].is_boolean());
+        assert!(body_json["result"]["structuredContent"]["generated_at_utc"].is_string());
+        assert!(body_json["result"]["structuredContent"]["window"]["start_utc"].is_string());
+        assert!(body_json["result"]["structuredContent"]["window"]["end_utc"].is_string());
+        assert!(body_json["result"]["structuredContent"]["logs"][0]["timestamp_utc"].is_string());
+        assert!(body_json["result"]["structuredContent"]["logs"][0]["priority"].is_string());
+        assert!(body_json["result"]["structuredContent"]["logs"][0]["hostname"].is_string());
+        assert!(body_json["result"]["structuredContent"]["logs"][0]["pid"].is_number());
+        assert!(body_json["result"]["structuredContent"]["logs"][0]["cursor"].is_string());
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_call_list_logs_honors_order_asc() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":311,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","order":"asc","limit":10}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 311);
+        let logs = body_json["result"]["structuredContent"]["logs"]
+            .as_array()
+            .expect("logs array");
+        assert_eq!(logs.len(), 3);
+        assert_eq!(logs[0]["timestamp_utc"], "2026-02-27T00:00:00.000Z");
+        assert_eq!(logs[1]["timestamp_utc"], "2026-02-27T00:30:00.000Z");
+        assert_eq!(logs[2]["timestamp_utc"], "2026-02-27T00:45:00.000Z");
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_call_list_logs_honors_exclude_units() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":312,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","exclude_units":["ssh.service","cron.service"],"limit":10}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 312);
+        let logs = body_json["result"]["structuredContent"]["logs"]
+            .as_array()
+            .expect("logs array");
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0]["unit"], "app.service");
     }
 
     #[tokio::test]

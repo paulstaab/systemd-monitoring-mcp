@@ -92,20 +92,35 @@ Startup behavior:
   - `generated_at_utc` (RFC3339 UTC string)
 
 `list_logs` behavior:
-- Must return log entries in descending timestamp order (newest first).
 - Input parameters:
   - `priority` optional minimum severity threshold (`0..7`) or aliases (`emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`).
   - `unit` optional systemd unit identifier.
   - `start_utc` required RFC3339 UTC timestamp (`Z` suffix).
   - `end_utc` required RFC3339 UTC timestamp (`Z` suffix).
-  - `limit` optional cap in range `1..1000`.
+  - `grep` optional substring filter or regex-lite pattern.
+  - `exclude_units` optional array of unit names to exclude.
+  - `order` optional sort order (`asc` or `desc`), default `desc`.
+  - `allow_large_window` optional boolean override for large time ranges.
+  - `limit` optional cap in range `1..1000`, default `200`.
 - `unit` must contain only ASCII alphanumeric, `.`, `-`, `_`, `@`, and `:`.
+- `exclude_units` entries must contain only ASCII alphanumeric, `.`, `-`, `_`, `@`, and `:`.
+- `start_utc` must be strictly less than `end_utc`.
+- Time windows larger than 7 days must be rejected unless `allow_large_window=true`.
 - Output entries must contain:
   - `timestamp_utc` (string)
-  - `timestamp_unix_usec` (number)
   - `unit` (string or null)
-  - `priority` (number or null)
+  - `priority` (string or number, normalized)
+  - `hostname` (string or null)
+  - `pid` (number or null)
   - `message` (string or null)
+  - `cursor` (string or null)
+- `message` values must be trimmed and sanitized for control characters.
+- `list_logs` response metadata must include:
+  - `total_scanned` (integer or null)
+  - `returned` (integer)
+  - `truncated` (boolean)
+  - `generated_at_utc` (RFC3339 UTC string)
+  - `window` object containing `start_utc` and `end_utc`
 
 ### 3.5 MCP Resources
 - The server must implement `resources/list`.

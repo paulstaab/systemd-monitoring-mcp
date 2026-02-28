@@ -79,7 +79,7 @@ curl -s \
 curl -s \
 	-H "Content-Type: application/json" \
 	-H "Authorization: Bearer $MCP_API_TOKEN" \
-	-d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_logs","arguments":{"priority":"err","unit":"sshd_service","start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","limit":100}}}' \
+	-d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_logs","arguments":{"priority":"err","unit":"sshd_service","exclude_units":["cron.service"],"grep":"/timeout|failed/","order":"desc","start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","limit":200}}}' \
 	http://127.0.0.1:8080/mcp
 ```
 
