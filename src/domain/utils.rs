@@ -74,27 +74,24 @@ pub fn normalize_priority(priority: Option<String>) -> Result<Option<String>, Ap
     Ok(Some(mapped.to_string()))
 }
 
-pub fn normalize_unit(unit: Option<String>) -> Result<Option<String>, AppError> {
-    let Some(value) = unit else {
-        return Ok(None);
-    };
-
-    let normalized = value.trim();
-    if normalized.is_empty() {
-        return Err(AppError::bad_request(
-            "invalid_unit",
-            "unit must contain only alphanumeric characters, dashes, underscores, dots, @, and :",
-        ));
-    }
-
-    if !normalized.chars().all(|character| {
+fn is_valid_unit_name_chars(s: &str) -> bool {
+    s.chars().all(|character| {
         character.is_ascii_alphanumeric()
             || character == '-'
             || character == '_'
             || character == '@'
             || character == ':'
             || character == '.'
-    }) {
+    })
+}
+
+pub fn normalize_unit(unit: Option<String>) -> Result<Option<String>, AppError> {
+    let Some(value) = unit else {
+        return Ok(None);
+    };
+
+    let normalized = value.trim();
+    if normalized.is_empty() || !is_valid_unit_name_chars(normalized) {
         return Err(AppError::bad_request(
             "invalid_unit",
             "unit must contain only alphanumeric characters, dashes, underscores, dots, @, and :",
@@ -111,20 +108,10 @@ pub fn normalize_unit_name_prefix(prefix: Option<String>) -> Result<Option<Strin
 
     let normalized = value.trim();
     if normalized.is_empty() {
-        return Err(AppError::bad_request(
-            "invalid_unit_name_prefix",
-            "unit_name_prefix must contain only alphanumeric characters, dashes, underscores, dots, @, and :",
-        ));
+        return Ok(None);
     }
 
-    if !normalized.chars().all(|character| {
-        character.is_ascii_alphanumeric()
-            || character == '-'
-            || character == '_'
-            || character == '@'
-            || character == ':'
-            || character == '.'
-    }) {
+    if !is_valid_unit_name_chars(normalized) {
         return Err(AppError::bad_request(
             "invalid_unit_name_prefix",
             "unit_name_prefix must contain only alphanumeric characters, dashes, underscores, dots, @, and :",
@@ -235,6 +222,12 @@ mod tests {
         let prefix = normalize_unit_name_prefix(Some("sshd/prod".to_string()));
         let error = prefix.expect_err("expected invalid unit name prefix");
         assert!(error.to_string().contains("bad request"));
+    }
+
+    #[test]
+    fn empty_unit_name_prefix_treated_as_none() {
+        let prefix = normalize_unit_name_prefix(Some("   ".to_string())).expect("valid prefix");
+        assert_eq!(prefix, None);
     }
 
     #[test]
