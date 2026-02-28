@@ -3,6 +3,7 @@
 //! Provides the primary MCP JSON-RPC decoding, method execution routing, capabilities
 //! negotiation (`initialize`), and tool/resource integrations routing mapping.
 
+use chrono::NaiveDate;
 use rust_mcp_sdk::schema::{
     CallToolRequest, Implementation, InitializeRequest, InitializeResult, JsonrpcMessage,
     JsonrpcRequest, ListResourcesRequest, ListResourcesResult, ListToolsRequest, ListToolsResult,
@@ -22,7 +23,7 @@ use crate::mcp::rpc::{
 use crate::{errors::AppError, AppState};
 
 pub const MIN_SUPPORTED_PROTOCOL_VERSION: &str = "2024-11-05";
-pub const FALLBACK_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V2025_11_25;
+pub const FALLBACK_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V2025_03_26;
 
 pub async fn handle_json_rpc_value(state: &AppState, payload: Value) -> Option<Value> {
     if !payload.is_object() {
@@ -194,7 +195,17 @@ pub fn negotiate_protocol_version(params: Option<&Value>) -> Result<ProtocolVers
         return Ok(protocol_version);
     }
 
-    if offered_version >= MIN_SUPPORTED_PROTOCOL_VERSION {
+    let offered_date = parse_protocol_version_date(offered_version).ok_or_else(|| {
+        AppError::bad_request(
+            "unsupported_protocol_version",
+            "unsupported initialize protocolVersion",
+        )
+    })?;
+
+    let min_supported_date = parse_protocol_version_date(MIN_SUPPORTED_PROTOCOL_VERSION)
+        .expect("MIN_SUPPORTED_PROTOCOL_VERSION must be valid YYYY-MM-DD");
+
+    if offered_date >= min_supported_date {
         return Ok(FALLBACK_PROTOCOL_VERSION);
     }
 
@@ -202,6 +213,35 @@ pub fn negotiate_protocol_version(params: Option<&Value>) -> Result<ProtocolVers
         "unsupported_protocol_version",
         "unsupported initialize protocolVersion",
     ))
+}
+
+fn parse_protocol_version_date(version: &str) -> Option<NaiveDate> {
+    if version.len() != 10 {
+        return None;
+    }
+
+    let mut parts = version.split('-');
+    let (Some(year), Some(month), Some(day), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return None;
+    };
+
+    if year.len() != 4
+        || month.len() != 2
+        || day.len() != 2
+        || !year.chars().all(|character| character.is_ascii_digit())
+        || !month.chars().all(|character| character.is_ascii_digit())
+        || !day.chars().all(|character| character.is_ascii_digit())
+    {
+        return None;
+    }
+
+    let year = year.parse::<i32>().ok()?;
+    let month = month.parse::<u32>().ok()?;
+    let day = day.parse::<u32>().ok()?;
+
+    NaiveDate::from_ymd_opt(year, month, day)
 }
 
 pub fn redact_audit_params(params: Option<&Value>) -> Value {
@@ -320,6 +360,28 @@ mod tests {
 
         let error =
             negotiate_protocol_version(Some(&params)).expect_err("unsupported version must fail");
+        assert!(error.to_string().contains("bad request"));
+    }
+
+    #[test]
+    fn negotiate_protocol_version_rejects_malformed_version() {
+        let params = json!({
+            "protocolVersion": "2024-9-01"
+        });
+
+        let error =
+            negotiate_protocol_version(Some(&params)).expect_err("malformed version must fail");
+        assert!(error.to_string().contains("bad request"));
+    }
+
+    #[test]
+    fn negotiate_protocol_version_rejects_non_date_version() {
+        let params = json!({
+            "protocolVersion": "future"
+        });
+
+        let error =
+            negotiate_protocol_version(Some(&params)).expect_err("non-date version must fail");
         assert!(error.to_string().contains("bad request"));
     }
 }
