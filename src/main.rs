@@ -18,12 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let provider = Arc::new(DbusSystemdClient::new());
     let bind_socket = config.bind_socket()?;
-    let state = AppState::new(
-        config.api_token.clone(),
-        config.allowed_cidr,
-        config.trusted_proxies,
-        provider,
-    );
+    let state = AppState::new(config.api_token.clone(), provider);
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind(bind_socket).await?;
 
@@ -33,10 +28,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "server starting"
     );
 
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-    )
-    .await?;
+    axum::serve(listener, app.into_make_service()).await?;
     Ok(())
 }

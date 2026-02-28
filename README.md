@@ -9,18 +9,20 @@ MCP server for monitoring a Linux server over JSON-RPC.
 - `POST /mcp` MCP JSON-RPC endpoint (bearer-token protected).
 - MCP tools: `list_services`, `list_logs`.
 - MCP resources: `resource://services/snapshot`, `resource://services/failed`, `resource://logs/recent`.
-- Bearer-token authentication using `MCP_API_TOKEN` (constant-time HMAC comparison).
-- Optional CIDR-based IP allowlist with trusted-proxy support (`X-Forwarded-For`).
+- Bearer-token authentication using `MCP_API_TOKEN`.
 
 ## Configuration
+
+**Note:** It is strongly recommended to run this service behind a reverse proxy (e.g., Nginx, HAProxy, Envoy)
+that takes care of TLS termination and restricts network access. 
+
+**DO NOT EXPOSE THIS TO THE INTERNET!**.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `MCP_API_TOKEN` | **yes** | — | Static API token (minimum 16 characters). |
 | `BIND_ADDR` | no | `127.0.0.1` | Bind address. |
 | `BIND_PORT` | no | `8080` | Bind port. |
-| `MCP_ALLOWED_CIDR` | no | — | If set, only requests originating from this CIDR range are accepted. |
-| `MCP_TRUSTED_PROXIES` | no | — | Comma-separated CIDR list of trusted reverse-proxy addresses. When the direct peer matches, the client IP is read from `X-Forwarded-For`. |
 
 ## Run
 
@@ -29,8 +31,6 @@ export MCP_API_TOKEN="a-secure-token-at-least-16-chars"
 # optional:
 # export BIND_ADDR="127.0.0.1"
 # export BIND_PORT="8080"
-# export MCP_ALLOWED_CIDR="10.0.0.0/8"
-# export MCP_TRUSTED_PROXIES="172.16.0.1/32,10.0.0.1/32"
 
 cargo run
 ```
