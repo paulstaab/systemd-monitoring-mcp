@@ -14,8 +14,8 @@ use rust_mcp_sdk::{
         JsonrpcResultResponse, ListResourcesRequest, ListResourcesResult, ListToolsRequest,
         ListToolsResult, PingRequest, ProtocolVersion, ReadResourceContent, ReadResourceRequest,
         ReadResourceRequestParams, ReadResourceResult, RequestId, Resource, Result as McpResult,
-        RpcError, ServerCapabilities, ServerCapabilitiesPrompts, ServerCapabilitiesResources,
-        ServerCapabilitiesTools, TextContent, TextResourceContents, Tool,
+        RpcError, ServerCapabilities, ServerCapabilitiesResources, ServerCapabilitiesTools,
+        TextContent, TextResourceContents, Tool,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,7 @@ use crate::{
 
 const MAX_LOG_LIMIT: usize = 1_000;
 const DEFAULT_LOG_LIMIT: usize = 100;
+const SUPPORTED_PROTOCOL_VERSION: &str = "2024-11-05";
 const VALID_SERVICE_STATES: [&str; 6] = [
     "active",
     "inactive",
@@ -227,6 +228,11 @@ async fn handle_json_rpc_request(
 
     let response = match method.as_str() {
         "initialize" => {
+            let protocol_version = match negotiate_protocol_version(params.as_ref()) {
+                Ok(version) => version,
+                Err(err) => return app_error_to_json_rpc(id, err),
+            };
+
             let initialize_result = InitializeResult {
                 server_info: Implementation {
                     name: env!("CARGO_PKG_NAME").to_string(),
@@ -244,12 +250,10 @@ async fn handle_json_rpc_request(
                         subscribe: Some(false),
                         list_changed: Some(false),
                     }),
-                    prompts: Some(ServerCapabilitiesPrompts {
-                        list_changed: Some(false),
-                    }),
+                    prompts: None,
                     ..Default::default()
                 },
-                protocol_version: ProtocolVersion::V2024_11_05.into(),
+                protocol_version: protocol_version.into(),
                 instructions: None,
                 meta: None,
             };
@@ -407,7 +411,18 @@ async fn handle_tools_call(state: &AppState, id: Option<Value>, params: Option<V
                 Err(err) => app_error_to_json_rpc(id, err),
             }
         }
-        _ => json_rpc_error(id, -32601, "Method not found"),
+        _ => json_rpc_error_with_data(
+            id,
+            -32601,
+            "Method not found",
+            Some(json!({
+                "code": "tool_not_found",
+                "message": "unknown tool name",
+                "details": {
+                    "name": tool_call.name,
+                },
+            })),
+        ),
     }
 }
 
@@ -493,8 +508,43 @@ async fn handle_resources_read(
                 Err(err) => app_error_to_json_rpc(id, err),
             }
         }
-        _ => json_rpc_error(id, -32601, "Method not found"),
+        _ => json_rpc_error_with_data(
+            id,
+            -32601,
+            "Method not found",
+            Some(json!({
+                "code": "resource_not_found",
+                "message": "unknown resource uri",
+                "details": {
+                    "uri": resource_read.uri,
+                },
+            })),
+        ),
     }
+}
+
+fn negotiate_protocol_version(params: Option<&Value>) -> Result<ProtocolVersion, AppError> {
+    let offered_version = params
+        .and_then(Value::as_object)
+        .and_then(|object| object.get("protocolVersion"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|version| !version.is_empty())
+        .ok_or_else(|| {
+            AppError::bad_request(
+                "invalid_protocol_version",
+                "initialize params.protocolVersion is required",
+            )
+        })?;
+
+    if offered_version != SUPPORTED_PROTOCOL_VERSION {
+        return Err(AppError::bad_request(
+            "unsupported_protocol_version",
+            "unsupported initialize protocolVersion",
+        ));
+    }
+
+    Ok(ProtocolVersion::V2024_11_05)
 }
 
 fn is_json_rpc_error(value: &Value) -> bool {
@@ -796,8 +846,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        build_log_query, filter_services_by_state, normalize_service_state, redact_audit_params,
-        LogsQueryParams, MAX_LOG_LIMIT,
+        build_log_query, filter_services_by_state, negotiate_protocol_version,
+        normalize_service_state, redact_audit_params, LogsQueryParams, MAX_LOG_LIMIT,
     };
 
     #[test]
@@ -928,5 +978,26 @@ mod tests {
             redacted["arguments"]["nested"]["secret"],
             json!("[REDACTED]")
         );
+    }
+
+    #[test]
+    fn negotiate_protocol_version_accepts_supported_version() {
+        let params = json!({
+            "protocolVersion": "2024-11-05"
+        });
+
+        let version = negotiate_protocol_version(Some(&params)).expect("supported version");
+        assert_eq!(version, super::ProtocolVersion::V2024_11_05);
+    }
+
+    #[test]
+    fn negotiate_protocol_version_rejects_unsupported_version() {
+        let params = json!({
+            "protocolVersion": "2026-01-01"
+        });
+
+        let error =
+            negotiate_protocol_version(Some(&params)).expect_err("unsupported version must fail");
+        assert!(error.to_string().contains("bad request"));
     }
 }

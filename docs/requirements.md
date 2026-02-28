@@ -70,7 +70,6 @@ Startup behavior:
 `list_services` behavior:
 - Must return only `*.service` units.
 - Must return all matching units in a single result.
-- Results must be ordered alphabetically by unit name.
 - Input parameters:
   - `state` optional service state filter (`active`, `inactive`, `failed`, `activating`, `deactivating`, `reloading`).
 - If `state` is provided, only services matching that state must be returned.

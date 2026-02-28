@@ -40,7 +40,6 @@
 ### Tool: `list_services`
 
 - `tools/call` for `list_services` returns only `*.service` units.
-- `list_services` output is sorted alphabetically by unit `name`.
 - Each output item includes `name`, `state`, and `description` (`string` or `null`).
 - `list_services` with `state=failed` returns only services where `state` is `failed`.
 - `list_services` with mixed-case state input (for example `FaIlEd`) applies a case-insensitive match.
