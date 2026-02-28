@@ -83,6 +83,22 @@ curl -s \
 	http://127.0.0.1:8080/mcp
 ```
 
+### MCP tools/call summary mode
+
+```bash
+curl -s \
+	-H "Content-Type: application/json" \
+	-H "Authorization: Bearer $MCP_API_TOKEN" \
+	-d '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"list_services","arguments":{"summary":true}}}' \
+	http://127.0.0.1:8080/mcp
+
+curl -s \
+	-H "Content-Type: application/json" \
+	-H "Authorization: Bearer $MCP_API_TOKEN" \
+	-d '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","summary":true}}}' \
+	http://127.0.0.1:8080/mcp
+```
+
 ### MCP resources/read failed services snapshot
 
 ```bash

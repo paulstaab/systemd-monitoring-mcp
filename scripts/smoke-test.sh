@@ -296,6 +296,16 @@ assert_contains "$list_services_body" '"returned"' "tools/call list_services did
 assert_contains "$list_services_body" '"truncated"' "tools/call list_services did not include truncated metadata"
 assert_contains "$list_services_body" '"generated_at_utc"' "tools/call list_services did not include generated_at_utc metadata"
 
+echo "[smoke] checking POST /mcp tools/call list_services summary"
+list_services_summary_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":161,"method":"tools/call","params":{"name":"list_services","arguments":{"summary":true}}}' \
+  "${BASE_URL}/mcp")"
+assert_contains "$list_services_summary_body" '"summary"' "tools/call list_services summary did not include summary block"
+assert_contains "$list_services_summary_body" '"counts_by_active_state"' "tools/call list_services summary missing counts_by_active_state"
+assert_contains "$list_services_summary_body" '"failed_units"' "tools/call list_services summary missing failed_units"
+
 echo "[smoke] checking POST /mcp tools/call list_logs invalid limit"
 list_logs_invalid_limit_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
@@ -310,5 +320,15 @@ list_logs_invalid_limit_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POS
 [[ "$list_logs_invalid_limit_status" == "200" ]] || fail "tools/call list_logs invalid limit returned ${list_logs_invalid_limit_status}, expected 200"
 assert_contains "$list_logs_invalid_limit_body" '"code":-32602' "tools/call list_logs invalid limit did not return invalid params error"
 assert_contains "$list_logs_invalid_limit_body" '"invalid_limit"' "tools/call list_logs invalid limit did not include invalid_limit code"
+
+echo "[smoke] checking POST /mcp tools/call list_logs summary"
+list_logs_summary_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":162,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"1970-01-01T01:00:00Z","summary":true}}}' \
+  "${BASE_URL}/mcp")"
+assert_contains "$list_logs_summary_body" '"summary"' "tools/call list_logs summary did not include summary block"
+assert_contains "$list_logs_summary_body" '"counts_by_unit"' "tools/call list_logs summary missing counts_by_unit"
+assert_contains "$list_logs_summary_body" '"top_messages"' "tools/call list_logs summary missing top_messages"
 
 echo "[smoke] PASS"

@@ -725,6 +725,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mcp_tools_call_list_services_summary_returns_compact_block() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":313,"method":"tools/call","params":{"name":"list_services","arguments":{"summary":true}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 313);
+        assert!(
+            body_json["result"]["structuredContent"]["summary"]["counts_by_active_state"]
+                .is_object()
+        );
+        assert!(body_json["result"]["structuredContent"]["summary"]["failed_units"].is_array());
+        assert!(body_json["result"]["structuredContent"]["summary"]["degraded_hint"].is_string());
+        assert!(body_json["result"]["structuredContent"]
+            .get("services")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_call_list_logs_summary_returns_compact_block() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":314,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","summary":true,"limit":10}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 314);
+        assert!(body_json["result"]["structuredContent"]["summary"]["counts_by_unit"].is_object());
+        assert!(
+            body_json["result"]["structuredContent"]["summary"]["counts_by_priority"].is_object()
+        );
+        assert!(body_json["result"]["structuredContent"]["summary"]["top_messages"].is_array());
+        assert!(body_json["result"]["structuredContent"]["summary"]["error_hotspots"].is_array());
+        assert!(body_json["result"]["structuredContent"]
+            .get("logs")
+            .is_none());
+    }
+
+    #[tokio::test]
     async fn mcp_tools_call_list_logs_honors_order_asc() {
         let response = app()
             .oneshot(

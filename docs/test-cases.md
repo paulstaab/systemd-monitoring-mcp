@@ -48,6 +48,7 @@
 - `list_services` default sorting is by `unit` ascending.
 - `list_services` with `state=failed` applies failed-first then unit sort order.
 - `list_services` structured output includes metadata: `total`, `returned`, `truncated`, `generated_at_utc`.
+- `list_services` with `summary=true` returns compact `summary` block with `counts_by_active_state`, `failed_units`, and `degraded_hint`.
 
 ### Tool: `list_logs`
 
@@ -70,6 +71,7 @@
 - `list_logs` with a window larger than 7 days returns JSON-RPC error `-32602` with stable error code `time_range_too_large` unless `allow_large_window=true`.
 - Each log entry includes `timestamp_utc`, `unit`, `priority`, `hostname`, `pid`, `message`, and `cursor`.
 - `list_logs` structured output includes metadata: `total_scanned`, `returned`, `truncated`, `generated_at_utc`, and `window` object.
+- `list_logs` with `summary=true` returns compact `summary` block with `counts_by_unit`, `counts_by_priority`, `top_messages`, and `error_hotspots`.
 
 ## MCP Resources
 
