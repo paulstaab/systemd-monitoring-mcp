@@ -4,7 +4,6 @@
 //! the `UnitProvider` systemd implementation dynamically.
 
 use chrono::{SecondsFormat, Utc};
-use regex::Regex;
 use rust_mcp_sdk::{
     macros,
     schema::{CallToolRequestParams, CallToolResult, ContentBlock, TextContent, Tool},
@@ -132,20 +131,6 @@ pub fn build_log_query(params: LogsQueryParams) -> Result<LogQuery, AppError> {
             ))
         }
     };
-
-    if let Some(grep) = params
-        .grep
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        if grep.len() >= 2 && grep.starts_with('/') && grep.ends_with('/') {
-            let pattern = &grep[1..grep.len() - 1];
-            Regex::new(pattern).map_err(|_| {
-                AppError::bad_request("invalid_grep", "grep regex pattern is invalid")
-            })?;
-        }
-    }
 
     let exclude_units = params
         .exclude_units
