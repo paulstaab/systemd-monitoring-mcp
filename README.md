@@ -14,9 +14,9 @@ MCP server for monitoring a Linux server over JSON-RPC.
 ## Configuration
 
 **Note:** It is strongly recommended to run this service behind a reverse proxy (e.g., Nginx, HAProxy, Envoy)
-that takes care of TLS termination and restricts network access. 
+that takes care of TLS termination and restricts network access.
 
-**DO NOT EXPOSE THIS TO THE INTERNET!**.
+**DO NOT EXPOSE THIS TO THE INTERNET!**
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
