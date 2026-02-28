@@ -8,7 +8,7 @@ MCP server for monitoring a Linux server over JSON-RPC.
 - `GET /.well-known/mcp` public MCP discovery endpoint.
 - `POST /mcp` MCP JSON-RPC endpoint (bearer-token protected).
 - MCP tools: `list_services`, `list_logs`.
-- MCP resources: `resource://services/snapshot`, `resource://logs/recent`.
+- MCP resources: `resource://services/snapshot`, `resource://services/failed`, `resource://logs/recent`.
 - Bearer-token authentication using `MCP_API_TOKEN` (constant-time HMAC comparison).
 - Optional CIDR-based IP allowlist with trusted-proxy support (`X-Forwarded-For`).
 
@@ -69,7 +69,7 @@ curl -s \
 curl -s \
 	-H "Content-Type: application/json" \
 	-H "Authorization: Bearer $MCP_API_TOKEN" \
-	-d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_services","arguments":{}}}' \
+	-d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"failed"}}}' \
 	http://127.0.0.1:8080/mcp
 ```
 
@@ -80,6 +80,16 @@ curl -s \
 	-H "Content-Type: application/json" \
 	-H "Authorization: Bearer $MCP_API_TOKEN" \
 	-d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_logs","arguments":{"priority":"err","unit":"sshd_service","start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","limit":100}}}' \
+	http://127.0.0.1:8080/mcp
+```
+
+### MCP resources/read failed services snapshot
+
+```bash
+curl -s \
+	-H "Content-Type: application/json" \
+	-H "Authorization: Bearer $MCP_API_TOKEN" \
+	-d '{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"resource://services/failed"}}' \
 	http://127.0.0.1:8080/mcp
 ```
 

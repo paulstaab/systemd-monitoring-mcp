@@ -92,6 +92,11 @@ mod tests {
                     state: "inactive".to_string(),
                     description: Some("A service".to_string()),
                 },
+                UnitStatus {
+                    name: "b.service".to_string(),
+                    state: "failed".to_string(),
+                    description: Some("B service".to_string()),
+                },
             ])
         }
 
@@ -396,6 +401,80 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mcp_tools_call_list_services_filters_by_state() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"inactive"}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 32);
+        assert_eq!(
+            body_json["result"]["structuredContent"]["services"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            body_json["result"]["structuredContent"]["services"][0]["name"],
+            "a.service"
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_call_list_services_rejects_invalid_state() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":33,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"running"}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 33);
+        assert_eq!(body_json["error"]["code"], -32602);
+        assert_eq!(body_json["error"]["data"]["code"], "invalid_state");
+    }
+
+    #[tokio::test]
     async fn mcp_tools_call_list_logs_returns_structured_content() {
         let response = app()
             .oneshot(
@@ -461,6 +540,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mcp_resources_read_failed_services_returns_failed_only() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":43,"method":"resources/read","params":{"uri":"resource://services/failed"}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 43);
+        assert_eq!(
+            body_json["result"]["contents"][0]["uri"],
+            "resource://services/failed"
+        );
+        let content_text = body_json["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("text content");
+        let content_json: serde_json::Value =
+            serde_json::from_str(content_text).expect("valid resource json");
+        assert_eq!(content_json["services"].as_array().map(Vec::len), Some(1));
+        assert_eq!(content_json["services"][0]["name"], "b.service");
+        assert_eq!(content_json["services"][0]["state"], "failed");
+    }
+
+    #[tokio::test]
     async fn mcp_resources_list_includes_fixed_uris() {
         let response = app()
             .oneshot(
@@ -496,6 +618,10 @@ mod tests {
         );
         assert_eq!(
             body_json["result"]["resources"][1]["uri"],
+            "resource://services/failed"
+        );
+        assert_eq!(
+            body_json["result"]["resources"][2]["uri"],
             "resource://logs/recent"
         );
     }

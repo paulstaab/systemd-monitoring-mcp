@@ -157,6 +157,35 @@ tools_list_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
 assert_contains "$tools_list_body" '"list_services"' "tools/list did not include list_services"
 assert_contains "$tools_list_body" '"list_logs"' "tools/list did not include list_logs"
 
+echo "[smoke] checking POST /mcp tools/call list_services with state filter"
+list_services_filtered_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":121,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"inactive"}}}' \
+  "${BASE_URL}/mcp")"
+list_services_filtered_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":121,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"inactive"}}}' \
+  "${BASE_URL}/mcp")"
+[[ "$list_services_filtered_status" == "200" ]] || fail "tools/call list_services filtered returned ${list_services_filtered_status}, expected 200"
+assert_contains "$list_services_filtered_body" '"structuredContent"' "tools/call list_services filtered did not return structuredContent"
+
+echo "[smoke] checking POST /mcp tools/call list_services invalid state"
+list_services_invalid_state_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":122,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"running"}}}' \
+  "${BASE_URL}/mcp")"
+list_services_invalid_state_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":122,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"running"}}}' \
+  "${BASE_URL}/mcp")"
+[[ "$list_services_invalid_state_status" == "200" ]] || fail "tools/call list_services invalid state returned ${list_services_invalid_state_status}, expected 200"
+assert_contains "$list_services_invalid_state_body" '"code":-32602' "tools/call list_services invalid state did not return invalid params error"
+assert_contains "$list_services_invalid_state_body" '"invalid_state"' "tools/call list_services invalid state did not include invalid_state code"
+
 echo "[smoke] checking POST /mcp resources/list"
 resources_list_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
@@ -170,7 +199,23 @@ resources_list_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   "${BASE_URL}/mcp")"
 [[ "$resources_list_status" == "200" ]] || fail "/mcp resources/list returned status ${resources_list_status}, expected 200"
 assert_contains "$resources_list_body" '"resource://services/snapshot"' "resources/list missing service snapshot URI"
+assert_contains "$resources_list_body" '"resource://services/failed"' "resources/list missing failed service snapshot URI"
 assert_contains "$resources_list_body" '"resource://logs/recent"' "resources/list missing logs snapshot URI"
+
+echo "[smoke] checking POST /mcp resources/read failed services snapshot"
+failed_services_resource_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":123,"method":"resources/read","params":{"uri":"resource://services/failed"}}' \
+  "${BASE_URL}/mcp")"
+failed_services_resource_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":123,"method":"resources/read","params":{"uri":"resource://services/failed"}}' \
+  "${BASE_URL}/mcp")"
+[[ "$failed_services_resource_status" == "200" ]] || fail "resources/read failed services snapshot returned ${failed_services_resource_status}, expected 200"
+assert_contains "$failed_services_resource_body" '"result"' "resources/read failed services snapshot did not return result"
+assert_contains "$failed_services_resource_body" '"resource://services/failed"' "resources/read failed services snapshot did not include expected uri"
 
 echo "[smoke] checking POST /mcp ping"
 mcp_ping_body="$(curl -sS -X POST \

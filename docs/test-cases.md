@@ -42,6 +42,9 @@
 - `tools/call` for `list_services` returns only `*.service` units.
 - `list_services` output is sorted alphabetically by unit `name`.
 - Each output item includes `name`, `state`, and `description` (`string` or `null`).
+- `list_services` with `state=failed` returns only services where `state` is `failed`.
+- `list_services` with mixed-case state input (for example `FaIlEd`) applies a case-insensitive match.
+- `list_services` with unsupported `state` value returns JSON-RPC error `-32602` with stable error code `invalid_state`.
 
 ### Tool: `list_logs`
 
@@ -58,10 +61,11 @@
 
 ## MCP Resources
 
-- `resources/list` returns at least two resources: service snapshot and logs snapshot.
-- `resources/list` includes fixed URIs `resource://services/snapshot` and `resource://logs/recent`.
+- `resources/list` returns at least three resources: service snapshot, failed service snapshot, and logs snapshot.
+- `resources/list` includes fixed URIs `resource://services/snapshot`, `resource://services/failed`, and `resource://logs/recent`.
 - `resources/list` includes stable resource identifiers and human-readable names.
 - `resources/read` for service snapshot returns schema-stable data matching service output model.
+- `resources/read` for failed service snapshot returns only entries where `state` is `failed`.
 - `resources/read` for logs snapshot returns schema-stable data matching log output model.
 - Successful `resources/read` responses use MCP `contents` shape and do not include non-schema top-level fields.
 - `resources/read` for unknown resource returns JSON-RPC error `-32601` (or project-defined equivalent) with stable error data.

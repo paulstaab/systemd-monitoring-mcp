@@ -22,10 +22,27 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tracing::info;
 
-use crate::{errors::AppError, systemd_client::LogQuery, AppState};
+use crate::{
+    errors::AppError,
+    systemd_client::{LogQuery, UnitStatus},
+    AppState,
+};
 
 const MAX_LOG_LIMIT: usize = 1_000;
 const DEFAULT_LOG_LIMIT: usize = 100;
+const VALID_SERVICE_STATES: [&str; 6] = [
+    "active",
+    "inactive",
+    "failed",
+    "activating",
+    "deactivating",
+    "reloading",
+];
+
+#[derive(Debug, Deserialize)]
+struct ServicesQueryParams {
+    state: Option<String>,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct LogsQueryParams {
@@ -49,6 +66,7 @@ pub struct DiscoveryResponse {
 }
 
 const SERVICES_RESOURCE_URI: &str = "resource://services/snapshot";
+const FAILED_SERVICES_RESOURCE_URI: &str = "resource://services/failed";
 const LOGS_RESOURCE_URI: &str = "resource://logs/recent";
 
 #[macros::mcp_tool(
@@ -56,7 +74,9 @@ const LOGS_RESOURCE_URI: &str = "resource://logs/recent";
     description = "List systemd service units and current state"
 )]
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
-struct ListServicesTool {}
+struct ListServicesTool {
+    state: Option<String>,
+}
 
 #[macros::mcp_tool(
     name = "list_logs",
@@ -269,6 +289,17 @@ async fn handle_json_rpc_request(
                     },
                     Resource {
                         annotations: None,
+                        description: Some("Current failed systemd service statuses".to_string()),
+                        icons: vec![],
+                        meta: None,
+                        mime_type: Some("application/json".to_string()),
+                        name: "Failed Service Snapshot".to_string(),
+                        size: None,
+                        title: None,
+                        uri: FAILED_SERVICES_RESOURCE_URI.to_string(),
+                    },
+                    Resource {
+                        annotations: None,
                         description: Some("Recent journald logs for the last hour".to_string()),
                         icons: vec![],
                         meta: None,
@@ -307,26 +338,42 @@ async fn handle_tools_call(state: &AppState, id: Option<Value>, params: Option<V
     };
 
     match tool_call.name.as_str() {
-        "list_services" => match state.unit_provider.list_service_units().await {
-            Ok(services) => json_rpc_result(
-                id,
-                serde_json::to_value(CallToolResult {
-                    content: vec![ContentBlock::from(TextContent::new(
-                        format!("Returned {} services", services.len()),
-                        None,
-                        None,
-                    ))],
-                    is_error: None,
-                    meta: None,
-                    structured_content: Some(serde_json::Map::from_iter([(
-                        "services".to_string(),
-                        json!(services),
-                    )])),
-                })
-                .expect("list_services tool result serialization"),
-            ),
-            Err(err) => app_error_to_json_rpc(id, err),
-        },
+        "list_services" => {
+            let query_params: ServicesQueryParams =
+                match serde_json::from_value(json!(tool_call.arguments.unwrap_or_default())) {
+                    Ok(value) => value,
+                    Err(_) => return json_rpc_error(id, -32602, "Invalid params"),
+                };
+
+            let state_filter = match normalize_service_state(query_params.state) {
+                Ok(value) => value,
+                Err(err) => return app_error_to_json_rpc(id, err),
+            };
+
+            match state.unit_provider.list_service_units().await {
+                Ok(services) => {
+                    let services = filter_services_by_state(services, state_filter.as_deref());
+                    json_rpc_result(
+                        id,
+                        serde_json::to_value(CallToolResult {
+                            content: vec![ContentBlock::from(TextContent::new(
+                                format!("Returned {} services", services.len()),
+                                None,
+                                None,
+                            ))],
+                            is_error: None,
+                            meta: None,
+                            structured_content: Some(serde_json::Map::from_iter([(
+                                "services".to_string(),
+                                json!(services),
+                            )])),
+                        })
+                        .expect("list_services tool result serialization"),
+                    )
+                }
+                Err(err) => app_error_to_json_rpc(id, err),
+            }
+        }
         "list_logs" => {
             let query_params: LogsQueryParams =
                 match serde_json::from_value(json!(tool_call.arguments.unwrap_or_default())) {
@@ -392,6 +439,25 @@ async fn handle_resources_read(
                     meta: None,
                 })
                 .expect("read services result serialization");
+
+                json_rpc_result(id, result)
+            }
+            Err(err) => app_error_to_json_rpc(id, err),
+        },
+        FAILED_SERVICES_RESOURCE_URI => match state.unit_provider.list_service_units().await {
+            Ok(services) => {
+                let services = filter_services_by_state(services, Some("failed"));
+                let structured_content = json!({ "services": services });
+                let result = serde_json::to_value(ReadResourceResult {
+                    contents: vec![ReadResourceContent::from(TextResourceContents {
+                        meta: None,
+                        mime_type: Some("application/json".to_string()),
+                        text: structured_content.to_string(),
+                        uri: FAILED_SERVICES_RESOURCE_URI.to_string(),
+                    })],
+                    meta: None,
+                })
+                .expect("read failed services result serialization");
 
                 json_rpc_result(id, result)
             }
@@ -640,6 +706,40 @@ fn normalize_unit(unit: Option<String>) -> Result<Option<String>, AppError> {
     Ok(Some(normalized.to_string()))
 }
 
+fn normalize_service_state(state: Option<String>) -> Result<Option<String>, AppError> {
+    let Some(value) = state else {
+        return Ok(None);
+    };
+
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_state",
+            "state must be one of: active, inactive, failed, activating, deactivating, reloading",
+        ));
+    }
+
+    if !VALID_SERVICE_STATES.contains(&normalized.as_str()) {
+        return Err(AppError::bad_request(
+            "invalid_state",
+            "state must be one of: active, inactive, failed, activating, deactivating, reloading",
+        ));
+    }
+
+    Ok(Some(normalized))
+}
+
+fn filter_services_by_state(services: Vec<UnitStatus>, state: Option<&str>) -> Vec<UnitStatus> {
+    let Some(state) = state else {
+        return services;
+    };
+
+    services
+        .into_iter()
+        .filter(|service| service.state.eq_ignore_ascii_case(state))
+        .collect()
+}
+
 fn json_rpc_error(id: Option<Value>, code: i32, message: &str) -> Value {
     json_rpc_error_with_data(id, code, message, None)
 }
@@ -692,9 +792,13 @@ fn request_id_to_value(id: RequestId) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use crate::systemd_client::UnitStatus;
     use serde_json::json;
 
-    use super::{build_log_query, redact_audit_params, LogsQueryParams, MAX_LOG_LIMIT};
+    use super::{
+        build_log_query, filter_services_by_state, normalize_service_state, redact_audit_params,
+        LogsQueryParams, MAX_LOG_LIMIT,
+    };
 
     #[test]
     fn rejects_limit_above_max() {
@@ -765,6 +869,39 @@ mod tests {
 
         let error = query.expect_err("expected missing time range");
         assert!(error.to_string().contains("bad request"));
+    }
+
+    #[test]
+    fn normalizes_service_state() {
+        let state = normalize_service_state(Some(" FaILeD ".to_string())).expect("valid state");
+        assert_eq!(state.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn rejects_invalid_service_state() {
+        let state = normalize_service_state(Some("running".to_string()));
+        let error = state.expect_err("expected invalid state");
+        assert!(error.to_string().contains("bad request"));
+    }
+
+    #[test]
+    fn filters_services_by_state_case_insensitive() {
+        let services = vec![
+            UnitStatus {
+                name: "a.service".to_string(),
+                state: "active".to_string(),
+                description: None,
+            },
+            UnitStatus {
+                name: "b.service".to_string(),
+                state: "failed".to_string(),
+                description: None,
+            },
+        ];
+
+        let filtered = filter_services_by_state(services, Some("FaIlEd"));
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "b.service");
     }
 
     #[test]

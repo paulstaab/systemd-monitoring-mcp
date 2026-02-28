@@ -71,6 +71,10 @@ Startup behavior:
 - Must return only `*.service` units.
 - Must return all matching units in a single result.
 - Results must be ordered alphabetically by unit name.
+- Input parameters:
+  - `state` optional service state filter (`active`, `inactive`, `failed`, `activating`, `deactivating`, `reloading`).
+- If `state` is provided, only services matching that state must be returned.
+- `state` matching must be case-insensitive.
 - Each item must contain:
   - `name` (string)
   - `state` (string)
@@ -97,7 +101,9 @@ Startup behavior:
 - The server must implement `resources/read`.
 - Minimum resources:
   - Service snapshot resource with fixed URI `resource://services/snapshot`.
+  - Failed service snapshot resource with fixed URI `resource://services/failed`.
   - Logs snapshot resource with fixed URI `resource://logs/recent`.
+- Failed service snapshot resource must return only services where `state` is `failed`.
 - Resource metadata in `resources/list` must include stable identifiers and human-readable names.
 - `resources/read` must return data in documented, schema-stable shapes.
 - `resources/read` successful responses must follow MCP `ReadResourceResult` shape (`contents`) without additional non-schema top-level fields.
