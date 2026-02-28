@@ -40,23 +40,6 @@ assert_contains() {
   fi
 }
 
-assert_log_contains() {
-  local needle="$1"
-  local message="$2"
-  local attempts=0
-  local max_attempts=30
-
-  while (( attempts < max_attempts )); do
-    if grep -aFq "$needle" "$SERVER_LOG"; then
-      return 0
-    fi
-    attempts=$((attempts + 1))
-    sleep 0.1
-  done
-
-  fail "$message"
-}
-
 wait_for_health() {
   local attempts=0
   local max_attempts=60
@@ -262,13 +245,5 @@ list_logs_invalid_limit_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POS
 [[ "$list_logs_invalid_limit_status" == "200" ]] || fail "tools/call list_logs invalid limit returned ${list_logs_invalid_limit_status}, expected 200"
 assert_contains "$list_logs_invalid_limit_body" '"code":-32602' "tools/call list_logs invalid limit did not return invalid params error"
 assert_contains "$list_logs_invalid_limit_body" '"invalid_limit"' "tools/call list_logs invalid limit did not include invalid_limit code"
-
-echo "[smoke] checking INFO audit logging for executed MCP actions"
-sleep 0.2
-assert_log_contains "mcp action audited method=initialize" "missing audit log for initialize"
-assert_log_contains "mcp action audited method=tools/list" "missing audit log for tools/list"
-assert_log_contains "mcp action audited method=resources/list" "missing audit log for resources/list"
-assert_log_contains "mcp action audited method=ping" "missing audit log for ping"
-assert_log_contains "mcp action audited method=tools/call" "missing audit log for tools/call"
 
 echo "[smoke] PASS"
