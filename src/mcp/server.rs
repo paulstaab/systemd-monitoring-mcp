@@ -21,7 +21,8 @@ use crate::mcp::rpc::{
 };
 use crate::{errors::AppError, AppState};
 
-pub const SUPPORTED_PROTOCOL_VERSION: &str = "2024-11-05";
+pub const MIN_SUPPORTED_PROTOCOL_VERSION: &str = "2024-11-05";
+pub const FALLBACK_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V2025_11_25;
 
 pub async fn handle_json_rpc_value(state: &AppState, payload: Value) -> Option<Value> {
     if !payload.is_object() {
@@ -189,14 +190,18 @@ pub fn negotiate_protocol_version(params: Option<&Value>) -> Result<ProtocolVers
             )
         })?;
 
-    if offered_version != SUPPORTED_PROTOCOL_VERSION {
-        return Err(AppError::bad_request(
-            "unsupported_protocol_version",
-            "unsupported initialize protocolVersion",
-        ));
+    if let Ok(protocol_version) = ProtocolVersion::try_from(offered_version) {
+        return Ok(protocol_version);
     }
 
-    Ok(ProtocolVersion::V2024_11_05)
+    if offered_version >= MIN_SUPPORTED_PROTOCOL_VERSION {
+        return Ok(FALLBACK_PROTOCOL_VERSION);
+    }
+
+    Err(AppError::bad_request(
+        "unsupported_protocol_version",
+        "unsupported initialize protocolVersion",
+    ))
 }
 
 pub fn redact_audit_params(params: Option<&Value>) -> Value {
@@ -245,7 +250,10 @@ pub fn is_sensitive_key(key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{negotiate_protocol_version, redact_audit_params, SUPPORTED_PROTOCOL_VERSION};
+    use super::{
+        negotiate_protocol_version, redact_audit_params, FALLBACK_PROTOCOL_VERSION,
+        MIN_SUPPORTED_PROTOCOL_VERSION,
+    };
     use serde_json::json;
 
     #[test]
@@ -277,7 +285,7 @@ mod tests {
     #[test]
     fn negotiate_protocol_version_accepts_supported_version() {
         let params = json!({
-            "protocolVersion": SUPPORTED_PROTOCOL_VERSION
+            "protocolVersion": MIN_SUPPORTED_PROTOCOL_VERSION
         });
 
         let version = negotiate_protocol_version(Some(&params)).expect("supported version");
@@ -285,9 +293,29 @@ mod tests {
     }
 
     #[test]
-    fn negotiate_protocol_version_rejects_unsupported_version() {
+    fn negotiate_protocol_version_accepts_modern_supported_version() {
+        let params = json!({
+            "protocolVersion": "2025-03-26"
+        });
+
+        let version = negotiate_protocol_version(Some(&params)).expect("modern version");
+        assert_eq!(version, rust_mcp_sdk::schema::ProtocolVersion::V2025_03_26);
+    }
+
+    #[test]
+    fn negotiate_protocol_version_falls_back_for_newer_unknown_version() {
         let params = json!({
             "protocolVersion": "2026-01-01"
+        });
+
+        let version = negotiate_protocol_version(Some(&params)).expect("fallback version");
+        assert_eq!(version, FALLBACK_PROTOCOL_VERSION);
+    }
+
+    #[test]
+    fn negotiate_protocol_version_rejects_too_old_version() {
+        let params = json!({
+            "protocolVersion": "2024-01-01"
         });
 
         let error =
