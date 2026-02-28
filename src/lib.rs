@@ -447,6 +447,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mcp_tools_call_list_services_filters_by_unit_name_prefix() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":34,"method":"tools/call","params":{"name":"list_services","arguments":{"unit_name_prefix":"b"}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 34);
+        assert_eq!(
+            body_json["result"]["structuredContent"]["services"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            body_json["result"]["structuredContent"]["services"][0]["name"],
+            "b.service"
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_call_list_services_filters_by_state_and_unit_name_prefix() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"failed","unit_name_prefix":"b"}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 35);
+        assert_eq!(
+            body_json["result"]["structuredContent"]["services"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            body_json["result"]["structuredContent"]["services"][0]["name"],
+            "b.service"
+        );
+        assert_eq!(
+            body_json["result"]["structuredContent"]["services"][0]["state"],
+            "failed"
+        );
+    }
+
+    #[tokio::test]
     async fn mcp_tools_call_list_services_rejects_invalid_state() {
         let response = app()
             .oneshot(

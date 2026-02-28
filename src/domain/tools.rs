@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::domain::utils::{
-    filter_services_by_state, normalize_priority, normalize_service_state, normalize_unit,
-    parse_utc, DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT,
+    filter_services_by_state, filter_services_by_unit_name_prefix, normalize_priority,
+    normalize_service_state, normalize_unit, normalize_unit_name_prefix, parse_utc,
+    DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT,
 };
 use crate::mcp::rpc::{
     app_error_to_json_rpc, json_rpc_error, json_rpc_error_with_data, json_rpc_result,
@@ -22,6 +23,7 @@ use crate::{errors::AppError, systemd_client::LogQuery, AppState};
 #[derive(Debug, Deserialize)]
 pub struct ServicesQueryParams {
     pub state: Option<String>,
+    pub unit_name_prefix: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +42,7 @@ pub struct LogsQueryParams {
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct ListServicesTool {
     pub state: Option<String>,
+    pub unit_name_prefix: Option<String>,
 }
 
 #[macros::mcp_tool(
@@ -122,10 +125,19 @@ pub async fn handle_tools_call(
                 Ok(value) => value,
                 Err(err) => return app_error_to_json_rpc(id, err),
             };
+            let unit_name_prefix_filter =
+                match normalize_unit_name_prefix(query_params.unit_name_prefix) {
+                    Ok(value) => value,
+                    Err(err) => return app_error_to_json_rpc(id, err),
+                };
 
             match state.unit_provider.list_service_units().await {
                 Ok(services) => {
                     let services = filter_services_by_state(services, state_filter.as_deref());
+                    let services = filter_services_by_unit_name_prefix(
+                        services,
+                        unit_name_prefix_filter.as_deref(),
+                    );
                     json_rpc_result(
                         id,
                         serde_json::to_value(CallToolResult {

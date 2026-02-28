@@ -68,8 +68,11 @@ Startup behavior:
 - Must return all matching units in a single result.
 - Input parameters:
   - `state` optional service state filter (`active`, `inactive`, `failed`, `activating`, `deactivating`, `reloading`).
+  - `unit_name_prefix` optional service unit-name prefix filter.
 - If `state` is provided, only services matching that state must be returned.
 - `state` matching must be case-insensitive.
+- If `unit_name_prefix` is provided, only services whose `name` starts with that prefix must be returned.
+- `unit_name_prefix` must contain only ASCII alphanumeric, `.`, `-`, `_`, `@`, and `:`.
 - Each item must contain:
   - `name` (string)
   - `state` (string)
