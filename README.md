@@ -69,7 +69,7 @@ curl -s \
 curl -s \
 	-H "Content-Type: application/json" \
 	-H "Authorization: Bearer $MCP_API_TOKEN" \
-	-d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"failed","unit_name_prefix":"sshd"}}}' \
+	-d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"failed","name_contains":"sshd","limit":200}}}' \
 	http://127.0.0.1:8080/mcp
 ```
 

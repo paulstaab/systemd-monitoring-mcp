@@ -37,13 +37,17 @@
 ### Tool: `list_services`
 
 - `tools/call` for `list_services` returns only `*.service` units.
-- Each output item includes `name`, `state`, and `description` (`string` or `null`).
-- `list_services` with `state=failed` returns only services where `state` is `failed`.
+- Each output item includes: `unit`, `description`, `load_state`, `active_state`, `sub_state`, `unit_file_state`, `since_utc`, `main_pid`, `exec_main_status`, `result`.
+- `list_services` with `state=failed` returns only services where `active_state` is `failed`.
 - `list_services` with mixed-case state input (for example `FaIlEd`) applies a case-insensitive match.
 - `list_services` with unsupported `state` value returns JSON-RPC error `-32602` with stable error code `invalid_state`.
-- `list_services` with `unit_name_prefix=ssh` returns only services whose names start with `ssh`.
-- `list_services` with both `state` and `unit_name_prefix` applies both filters.
-- `list_services` with disallowed `unit_name_prefix` characters (for example `/`) returns JSON-RPC error `-32602` with stable error code `invalid_unit_name_prefix`.
+- `list_services` with `name_contains=ssh` returns only services whose unit names contain `ssh`.
+- `list_services` with both `state` and `name_contains` applies both filters.
+- `list_services` defaults to `limit=200` and enforces max `limit=1000`.
+- `list_services` with `limit=0` or `limit=1001` returns JSON-RPC error `-32602` with stable error code `invalid_limit`.
+- `list_services` default sorting is by `unit` ascending.
+- `list_services` with `state=failed` applies failed-first then unit sort order.
+- `list_services` structured output includes metadata: `total`, `returned`, `truncated`, `generated_at_utc`.
 
 ### Tool: `list_logs`
 
@@ -64,7 +68,7 @@
 - `resources/list` includes fixed URIs `resource://services/snapshot`, `resource://services/failed`, and `resource://logs/recent`.
 - `resources/list` includes stable resource identifiers and human-readable names.
 - `resources/read` for service snapshot returns schema-stable data matching service output model.
-- `resources/read` for failed service snapshot returns only entries where `state` is `failed`.
+- `resources/read` for failed service snapshot returns only entries where `active_state` is `failed`.
 - `resources/read` for logs snapshot returns schema-stable data matching log output model.
 - Successful `resources/read` responses use MCP `contents` shape and do not include non-schema top-level fields.
 - `resources/read` for unknown resource returns JSON-RPC error `-32601` (or project-defined equivalent) with stable error data.

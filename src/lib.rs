@@ -70,19 +70,40 @@ mod tests {
         async fn list_service_units(&self) -> Result<Vec<UnitStatus>, crate::errors::AppError> {
             Ok(vec![
                 UnitStatus {
-                    name: "z.service".to_string(),
-                    state: "active".to_string(),
-                    description: None,
+                    unit: "z.service".to_string(),
+                    description: "".to_string(),
+                    load_state: "loaded".to_string(),
+                    active_state: "active".to_string(),
+                    sub_state: "running".to_string(),
+                    unit_file_state: Some("enabled".to_string()),
+                    since_utc: Some("2026-02-27T00:00:00.000Z".to_string()),
+                    main_pid: Some(3001),
+                    exec_main_status: Some(0),
+                    result: Some("success".to_string()),
                 },
                 UnitStatus {
-                    name: "a.service".to_string(),
-                    state: "inactive".to_string(),
-                    description: Some("A service".to_string()),
+                    unit: "a.service".to_string(),
+                    description: "A service".to_string(),
+                    load_state: "loaded".to_string(),
+                    active_state: "inactive".to_string(),
+                    sub_state: "dead".to_string(),
+                    unit_file_state: Some("disabled".to_string()),
+                    since_utc: None,
+                    main_pid: None,
+                    exec_main_status: None,
+                    result: None,
                 },
                 UnitStatus {
-                    name: "b.service".to_string(),
-                    state: "failed".to_string(),
-                    description: Some("B service".to_string()),
+                    unit: "b.service".to_string(),
+                    description: "B service".to_string(),
+                    load_state: "loaded".to_string(),
+                    active_state: "failed".to_string(),
+                    sub_state: "failed".to_string(),
+                    unit_file_state: Some("enabled".to_string()),
+                    since_utc: Some("2026-02-28T00:00:00.000Z".to_string()),
+                    main_pid: Some(4001),
+                    exec_main_status: Some(1),
+                    result: Some("exit-code".to_string()),
                 },
             ])
         }
@@ -402,6 +423,14 @@ mod tests {
         assert_eq!(body_json["jsonrpc"], "2.0");
         assert_eq!(body_json["id"], 3);
         assert!(body_json["result"]["structuredContent"]["services"].is_array());
+        assert!(body_json["result"]["structuredContent"]["total"].is_number());
+        assert!(body_json["result"]["structuredContent"]["returned"].is_number());
+        assert!(body_json["result"]["structuredContent"]["truncated"].is_boolean());
+        assert!(body_json["result"]["structuredContent"]["generated_at_utc"].is_string());
+        assert!(body_json["result"]["structuredContent"]["services"][0]["unit"].is_string());
+        assert!(
+            body_json["result"]["structuredContent"]["services"][0]["active_state"].is_string()
+        );
         assert!(body_json["result"]["content"].is_array());
     }
 
@@ -441,13 +470,13 @@ mod tests {
             Some(1)
         );
         assert_eq!(
-            body_json["result"]["structuredContent"]["services"][0]["name"],
+            body_json["result"]["structuredContent"]["services"][0]["unit"],
             "a.service"
         );
     }
 
     #[tokio::test]
-    async fn mcp_tools_call_list_services_filters_by_unit_name_prefix() {
+    async fn mcp_tools_call_list_services_filters_by_name_contains() {
         let response = app()
             .oneshot(
                 Request::builder()
@@ -456,7 +485,7 @@ mod tests {
                     .header(header::CONTENT_TYPE, "application/json")
                     .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
-                        r#"{"jsonrpc":"2.0","id":34,"method":"tools/call","params":{"name":"list_services","arguments":{"unit_name_prefix":"b"}}}"#,
+                        r#"{"jsonrpc":"2.0","id":34,"method":"tools/call","params":{"name":"list_services","arguments":{"name_contains":"b."}}}"#,
                     ))
                     .expect("request build"),
             )
@@ -482,13 +511,13 @@ mod tests {
             Some(1)
         );
         assert_eq!(
-            body_json["result"]["structuredContent"]["services"][0]["name"],
+            body_json["result"]["structuredContent"]["services"][0]["unit"],
             "b.service"
         );
     }
 
     #[tokio::test]
-    async fn mcp_tools_call_list_services_filters_by_state_and_unit_name_prefix() {
+    async fn mcp_tools_call_list_services_filters_by_state_and_name_contains() {
         let response = app()
             .oneshot(
                 Request::builder()
@@ -497,7 +526,7 @@ mod tests {
                     .header(header::CONTENT_TYPE, "application/json")
                     .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
-                        r#"{"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"failed","unit_name_prefix":"b"}}}"#,
+                        r#"{"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"list_services","arguments":{"state":"failed","name_contains":"b"}}}"#,
                     ))
                     .expect("request build"),
             )
@@ -523,11 +552,11 @@ mod tests {
             Some(1)
         );
         assert_eq!(
-            body_json["result"]["structuredContent"]["services"][0]["name"],
+            body_json["result"]["structuredContent"]["services"][0]["unit"],
             "b.service"
         );
         assert_eq!(
-            body_json["result"]["structuredContent"]["services"][0]["state"],
+            body_json["result"]["structuredContent"]["services"][0]["active_state"],
             "failed"
         );
     }
@@ -566,7 +595,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mcp_tools_call_list_services_rejects_invalid_unit_name_prefix() {
+    async fn mcp_tools_call_list_services_rejects_invalid_limit() {
         let response = app()
             .oneshot(
                 Request::builder()
@@ -575,7 +604,7 @@ mod tests {
                     .header(header::CONTENT_TYPE, "application/json")
                     .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
-                        r#"{"jsonrpc":"2.0","id":36,"method":"tools/call","params":{"name":"list_services","arguments":{"unit_name_prefix":"sshd/prod"}}}"#,
+                        r#"{"jsonrpc":"2.0","id":36,"method":"tools/call","params":{"name":"list_services","arguments":{"limit":1001}}}"#,
                     ))
                     .expect("request build"),
             )
@@ -595,10 +624,7 @@ mod tests {
         assert_eq!(body_json["jsonrpc"], "2.0");
         assert_eq!(body_json["id"], 36);
         assert_eq!(body_json["error"]["code"], -32602);
-        assert_eq!(
-            body_json["error"]["data"]["code"],
-            "invalid_unit_name_prefix"
-        );
+        assert_eq!(body_json["error"]["data"]["code"], "invalid_limit");
     }
 
     #[tokio::test]
@@ -705,8 +731,8 @@ mod tests {
         let content_json: serde_json::Value =
             serde_json::from_str(content_text).expect("valid resource json");
         assert_eq!(content_json["services"].as_array().map(Vec::len), Some(1));
-        assert_eq!(content_json["services"][0]["name"], "b.service");
-        assert_eq!(content_json["services"][0]["state"], "failed");
+        assert_eq!(content_json["services"][0]["unit"], "b.service");
+        assert_eq!(content_json["services"][0]["active_state"], "failed");
     }
 
     #[tokio::test]

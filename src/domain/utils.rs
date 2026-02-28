@@ -5,6 +5,8 @@ use chrono::{DateTime, Utc};
 
 pub const MAX_LOG_LIMIT: usize = 1_000;
 pub const DEFAULT_LOG_LIMIT: usize = 100;
+pub const MAX_SERVICES_LIMIT: usize = 1_000;
+pub const DEFAULT_SERVICES_LIMIT: usize = 200;
 pub const VALID_SERVICE_STATES: [&str; 6] = [
     "active",
     "inactive",
@@ -101,24 +103,15 @@ pub fn normalize_unit(unit: Option<String>) -> Result<Option<String>, AppError> 
     Ok(Some(normalized.to_string()))
 }
 
-pub fn normalize_unit_name_prefix(prefix: Option<String>) -> Result<Option<String>, AppError> {
-    let Some(value) = prefix else {
-        return Ok(None);
-    };
+pub fn normalize_name_contains(value: Option<String>) -> Option<String> {
+    let value = value?;
 
     let normalized = value.trim();
     if normalized.is_empty() {
-        return Ok(None);
+        return None;
     }
 
-    if !is_valid_unit_name_chars(normalized) {
-        return Err(AppError::bad_request(
-            "invalid_unit_name_prefix",
-            "unit_name_prefix must contain only alphanumeric characters, dashes, underscores, dots, @, and :",
-        ));
-    }
-
-    Ok(Some(normalized.to_string()))
+    Some(normalized.to_string())
 }
 
 pub fn normalize_service_state(state: Option<String>) -> Result<Option<String>, AppError> {
@@ -144,6 +137,18 @@ pub fn normalize_service_state(state: Option<String>) -> Result<Option<String>, 
     Ok(Some(normalized))
 }
 
+pub fn normalize_services_limit(limit: Option<usize>) -> Result<usize, AppError> {
+    let limit = limit.unwrap_or(DEFAULT_SERVICES_LIMIT);
+    if limit == 0 || limit > MAX_SERVICES_LIMIT {
+        return Err(AppError::bad_request(
+            "invalid_limit",
+            "limit must be between 1 and 1000",
+        ));
+    }
+
+    Ok(limit)
+}
+
 pub fn filter_services_by_state(services: Vec<UnitStatus>, state: Option<&str>) -> Vec<UnitStatus> {
     let Some(state) = state else {
         return services;
@@ -151,29 +156,45 @@ pub fn filter_services_by_state(services: Vec<UnitStatus>, state: Option<&str>) 
 
     services
         .into_iter()
-        .filter(|service| service.state.eq_ignore_ascii_case(state))
+        .filter(|service| service.active_state.eq_ignore_ascii_case(state))
         .collect()
 }
 
-pub fn filter_services_by_unit_name_prefix(
+pub fn filter_services_by_name_contains(
     services: Vec<UnitStatus>,
-    unit_name_prefix: Option<&str>,
+    name_contains: Option<&str>,
 ) -> Vec<UnitStatus> {
-    let Some(unit_name_prefix) = unit_name_prefix else {
+    let Some(name_contains) = name_contains else {
         return services;
     };
 
     services
         .into_iter()
-        .filter(|service| service.name.starts_with(unit_name_prefix))
+        .filter(|service| service.unit.contains(name_contains))
         .collect()
+}
+
+pub fn sort_services(services: &mut [UnitStatus], failed_first: bool) {
+    if failed_first {
+        services.sort_by(|left, right| {
+            let left_failed = left.active_state.eq_ignore_ascii_case("failed");
+            let right_failed = right.active_state.eq_ignore_ascii_case("failed");
+
+            right_failed
+                .cmp(&left_failed)
+                .then_with(|| left.unit.cmp(&right.unit))
+        });
+        return;
+    }
+
+    services.sort_by(|left, right| left.unit.cmp(&right.unit));
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        filter_services_by_state, filter_services_by_unit_name_prefix, normalize_service_state,
-        normalize_unit_name_prefix,
+        filter_services_by_name_contains, filter_services_by_state, normalize_name_contains,
+        normalize_service_state, normalize_services_limit, sort_services,
     };
     use crate::systemd_client::UnitStatus;
 
@@ -194,59 +215,118 @@ mod tests {
     fn filters_services_by_state_case_insensitive() {
         let services = vec![
             UnitStatus {
-                name: "a.service".to_string(),
-                state: "active".to_string(),
-                description: None,
+                unit: "a.service".to_string(),
+                description: "A".to_string(),
+                load_state: "loaded".to_string(),
+                active_state: "active".to_string(),
+                sub_state: "running".to_string(),
+                unit_file_state: None,
+                since_utc: None,
+                main_pid: None,
+                exec_main_status: None,
+                result: None,
             },
             UnitStatus {
-                name: "b.service".to_string(),
-                state: "failed".to_string(),
-                description: None,
+                unit: "b.service".to_string(),
+                description: "B".to_string(),
+                load_state: "loaded".to_string(),
+                active_state: "failed".to_string(),
+                sub_state: "failed".to_string(),
+                unit_file_state: None,
+                since_utc: None,
+                main_pid: None,
+                exec_main_status: None,
+                result: None,
             },
         ];
 
         let filtered = filter_services_by_state(services, Some("FaIlEd"));
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].name, "b.service");
+        assert_eq!(filtered[0].unit, "b.service");
     }
 
     #[test]
-    fn normalizes_unit_name_prefix() {
-        let prefix =
-            normalize_unit_name_prefix(Some("  sshd@prod ".to_string())).expect("valid prefix");
-        assert_eq!(prefix.as_deref(), Some("sshd@prod"));
+    fn normalizes_name_contains() {
+        let filter = normalize_name_contains(Some("  sshd@prod ".to_string()));
+        assert_eq!(filter.as_deref(), Some("sshd@prod"));
     }
 
     #[test]
-    fn rejects_unit_name_prefix_with_disallowed_characters() {
-        let prefix = normalize_unit_name_prefix(Some("sshd/prod".to_string()));
-        let error = prefix.expect_err("expected invalid unit name prefix");
+    fn empty_name_contains_treated_as_none() {
+        let filter = normalize_name_contains(Some("   ".to_string()));
+        assert_eq!(filter, None);
+    }
+
+    #[test]
+    fn rejects_invalid_services_limit() {
+        let error = normalize_services_limit(Some(1_001)).expect_err("invalid limit");
         assert!(error.to_string().contains("bad request"));
     }
 
     #[test]
-    fn empty_unit_name_prefix_treated_as_none() {
-        let prefix = normalize_unit_name_prefix(Some("   ".to_string())).expect("valid prefix");
-        assert_eq!(prefix, None);
-    }
-
-    #[test]
-    fn filters_services_by_unit_name_prefix() {
+    fn filters_services_by_name_contains() {
         let services = vec![
             UnitStatus {
-                name: "a.service".to_string(),
-                state: "active".to_string(),
-                description: None,
+                unit: "a.service".to_string(),
+                description: "A".to_string(),
+                load_state: "loaded".to_string(),
+                active_state: "active".to_string(),
+                sub_state: "running".to_string(),
+                unit_file_state: None,
+                since_utc: None,
+                main_pid: None,
+                exec_main_status: None,
+                result: None,
             },
             UnitStatus {
-                name: "b.service".to_string(),
-                state: "failed".to_string(),
-                description: None,
+                unit: "b.service".to_string(),
+                description: "B".to_string(),
+                load_state: "loaded".to_string(),
+                active_state: "failed".to_string(),
+                sub_state: "failed".to_string(),
+                unit_file_state: None,
+                since_utc: None,
+                main_pid: None,
+                exec_main_status: None,
+                result: None,
             },
         ];
 
-        let filtered = filter_services_by_unit_name_prefix(services, Some("b."));
+        let filtered = filter_services_by_name_contains(services, Some("b."));
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].name, "b.service");
+        assert_eq!(filtered[0].unit, "b.service");
+    }
+
+    #[test]
+    fn sorts_failed_first_then_unit() {
+        let mut services = vec![
+            UnitStatus {
+                unit: "z.service".to_string(),
+                description: "Z".to_string(),
+                load_state: "loaded".to_string(),
+                active_state: "active".to_string(),
+                sub_state: "running".to_string(),
+                unit_file_state: None,
+                since_utc: None,
+                main_pid: None,
+                exec_main_status: None,
+                result: None,
+            },
+            UnitStatus {
+                unit: "a.service".to_string(),
+                description: "A".to_string(),
+                load_state: "loaded".to_string(),
+                active_state: "failed".to_string(),
+                sub_state: "failed".to_string(),
+                unit_file_state: None,
+                since_utc: None,
+                main_pid: None,
+                exec_main_status: None,
+                result: None,
+            },
+        ];
+
+        sort_services(&mut services, true);
+        assert_eq!(services[0].unit, "a.service");
     }
 }
