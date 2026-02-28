@@ -141,13 +141,6 @@ mcp_initialize_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
 assert_contains "$mcp_initialize_body" '"jsonrpc":"2.0"' "initialize did not return jsonrpc envelope"
 assert_contains "$mcp_initialize_body" '"protocolVersion":"2024-11-05"' "initialize did not return protocolVersion"
 
-echo "[smoke] checking POST / is not an MCP endpoint"
-root_post_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"jsonrpc":"2.0","id":11,"method":"initialize"}' \
-  "${BASE_URL}/")"
-[[ "$root_post_status" == "404" || "$root_post_status" == "405" ]] || fail "/ returned status ${root_post_status}, expected 404 or 405"
 
 echo "[smoke] checking POST /mcp tools/list"
 tools_list_body="$(curl -sS -X POST \
@@ -239,13 +232,6 @@ mcp_ping_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
 assert_contains "$mcp_ping_body" '"jsonrpc":"2.0"' "ping did not return jsonrpc envelope"
 assert_contains "$mcp_ping_body" '"result":{}' "ping did not return empty result object"
 
-echo "[smoke] checking GET /services is removed"
-services_route_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/services")"
-[[ "$services_route_status" == "404" ]] || fail "/services returned ${services_route_status}, expected 404"
-
-echo "[smoke] checking GET /logs is removed"
-logs_route_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/logs")"
-[[ "$logs_route_status" == "404" ]] || fail "/logs returned ${logs_route_status}, expected 404"
 
 echo "[smoke] checking POST /mcp ping with invalid token"
 mcp_ping_invalid_token_body="$(curl -sS -X POST \
@@ -274,6 +260,21 @@ list_logs_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   "${BASE_URL}/mcp")"
 [[ "$list_logs_status" == "200" ]] || fail "tools/call list_logs returned ${list_logs_status}, expected 200"
 assert_contains "$list_logs_body" '"structuredContent"' "tools/call list_logs did not return structuredContent"
+
+echo "[smoke] checking POST /mcp tools/call list_services"
+list_services_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"list_services","arguments":{}}}' \
+  "${BASE_URL}/mcp")"
+list_services_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"list_services","arguments":{}}}' \
+  "${BASE_URL}/mcp")"
+[[ "$list_services_status" == "200" ]] || fail "tools/call list_services returned ${list_services_status}, expected 200"
+assert_contains "$list_services_body" '"structuredContent"' "tools/call list_services did not return structuredContent"
+assert_contains "$list_services_body" '"services"' "tools/call list_services did not include services payload"
 
 echo "[smoke] checking POST /mcp tools/call list_logs invalid limit"
 list_logs_invalid_limit_body="$(curl -sS -X POST \

@@ -20,6 +20,7 @@ use rust_mcp_sdk::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tracing::info;
 
 use crate::{
     errors::AppError,
@@ -222,7 +223,9 @@ async fn handle_json_rpc_request(
     method: String,
     params: Option<Value>,
 ) -> Value {
-    match method.as_str() {
+    let audit_params = redact_audit_params(params.as_ref());
+
+    let response = match method.as_str() {
         "initialize" => {
             let initialize_result = InitializeResult {
                 server_info: Implementation {
@@ -312,7 +315,16 @@ async fn handle_json_rpc_request(
         ),
         "resources/read" => handle_resources_read(state, id, params).await,
         _ => json_rpc_error(id, -32601, "Method not found"),
-    }
+    };
+
+    info!(
+        method = %method,
+        params = %audit_params,
+        outcome = if is_json_rpc_error(&response) { "failure" } else { "success" },
+        "mcp action audited"
+    );
+
+    response
 }
 
 async fn handle_tools_call(state: &AppState, id: Option<Value>, params: Option<Value>) -> Value {
@@ -483,6 +495,54 @@ async fn handle_resources_read(
         }
         _ => json_rpc_error(id, -32601, "Method not found"),
     }
+}
+
+fn is_json_rpc_error(value: &Value) -> bool {
+    value.get("error").is_some()
+}
+
+fn redact_audit_params(params: Option<&Value>) -> Value {
+    params.map(redact_audit_value).unwrap_or(Value::Null)
+}
+
+fn redact_audit_value(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, item)| {
+                    if is_sensitive_key(key) {
+                        (key.clone(), Value::String("[REDACTED]".to_string()))
+                    } else {
+                        (key.clone(), redact_audit_value(item))
+                    }
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(redact_audit_value).collect()),
+        _ => value.clone(),
+    }
+}
+
+fn is_sensitive_key(key: &str) -> bool {
+    let normalized = key.trim().to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "token"
+            | "api_token"
+            | "access_token"
+            | "refresh_token"
+            | "authorization"
+            | "bearer"
+            | "password"
+            | "secret"
+            | "credentials"
+            | "credential"
+            | "api_key"
+            | "apikey"
+    ) || normalized.contains("token")
+        || normalized.contains("secret")
+        || normalized.contains("password")
+        || normalized.contains("credential")
 }
 
 fn build_tools_list() -> Vec<Tool> {
@@ -733,10 +793,11 @@ fn request_id_to_value(id: RequestId) -> Value {
 #[cfg(test)]
 mod tests {
     use crate::systemd_client::UnitStatus;
+    use serde_json::json;
 
     use super::{
         build_log_query, filter_services_by_state, normalize_service_state, LogsQueryParams,
-        MAX_LOG_LIMIT,
+        redact_audit_params, MAX_LOG_LIMIT,
     };
 
     #[test]
@@ -841,5 +902,31 @@ mod tests {
         let filtered = filter_services_by_state(services, Some("FaIlEd"));
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "b.service");
+    }
+
+    #[test]
+    fn redacts_sensitive_fields_in_audit_params() {
+        let params = json!({
+            "name": "list_logs",
+            "arguments": {
+                "unit": "sshd.service",
+                "token": "should-not-appear",
+                "api_key": "should-not-appear",
+                "nested": {
+                    "secret": "should-not-appear"
+                }
+            }
+        });
+
+        let redacted = redact_audit_params(Some(&params));
+
+        assert_eq!(redacted["name"], json!("list_logs"));
+        assert_eq!(redacted["arguments"]["unit"], json!("sshd.service"));
+        assert_eq!(redacted["arguments"]["token"], json!("[REDACTED]"));
+        assert_eq!(redacted["arguments"]["api_key"], json!("[REDACTED]"));
+        assert_eq!(
+            redacted["arguments"]["nested"]["secret"],
+            json!("[REDACTED]")
+        );
     }
 }
