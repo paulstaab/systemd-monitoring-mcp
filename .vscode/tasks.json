@@ -16,6 +16,14 @@
       "args": ["build"],
       "group": "build",
       "problemMatcher": []
+    },
+    {
+      "label": "cargo: generate-lockfile",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["generate-lockfile"],
+      "group": "build",
+      "problemMatcher": []
     }
   ]
 }
