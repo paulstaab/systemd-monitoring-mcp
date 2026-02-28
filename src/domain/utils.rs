@@ -1,7 +1,7 @@
 //! Domain-specific shared validations and formatting utilities
 
-use chrono::{DateTime, Utc};
 use crate::{errors::AppError, systemd_client::UnitStatus};
+use chrono::{DateTime, Utc};
 
 pub const MAX_LOG_LIMIT: usize = 1_000;
 pub const DEFAULT_LOG_LIMIT: usize = 100;
@@ -140,10 +140,8 @@ pub fn filter_services_by_state(services: Vec<UnitStatus>, state: Option<&str>) 
 
 #[cfg(test)]
 mod tests {
+    use super::{filter_services_by_state, normalize_service_state};
     use crate::systemd_client::UnitStatus;
-    use super::{
-        filter_services_by_state, normalize_service_state
-    };
 
     #[test]
     fn normalizes_service_state_test() {

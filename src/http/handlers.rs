@@ -12,9 +12,9 @@ use axum::{
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::AppState;
-use crate::mcp::server::handle_json_rpc_value;
 use crate::mcp::rpc::json_rpc_error;
+use crate::mcp::server::handle_json_rpc_value;
+use crate::AppState;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {

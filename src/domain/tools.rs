@@ -10,16 +10,14 @@ use rust_mcp_sdk::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::{
-    errors::AppError,
-    systemd_client::LogQuery,
-    AppState,
-};
 use crate::domain::utils::{
-    filter_services_by_state, normalize_priority, normalize_service_state, normalize_unit, parse_utc,
-    DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT,
+    filter_services_by_state, normalize_priority, normalize_service_state, normalize_unit,
+    parse_utc, DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT,
 };
-use crate::mcp::rpc::{app_error_to_json_rpc, json_rpc_error, json_rpc_error_with_data, json_rpc_result};
+use crate::mcp::rpc::{
+    app_error_to_json_rpc, json_rpc_error, json_rpc_error_with_data, json_rpc_result,
+};
+use crate::{errors::AppError, systemd_client::LogQuery, AppState};
 
 #[derive(Debug, Deserialize)]
 pub struct ServicesQueryParams {
@@ -98,7 +96,11 @@ pub fn build_log_query(params: LogsQueryParams) -> Result<LogQuery, AppError> {
     })
 }
 
-pub async fn handle_tools_call(state: &AppState, id: Option<Value>, params: Option<Value>) -> Value {
+pub async fn handle_tools_call(
+    state: &AppState,
+    id: Option<Value>,
+    params: Option<Value>,
+) -> Value {
     let Some(raw_params) = params else {
         return json_rpc_error(id, -32602, "Invalid params");
     };

@@ -1,20 +1,19 @@
 //! Model Context Protocol static resource providers
 //!
-//! Exposes host system snapshots as file-like resources under `resource://` URIs. 
+//! Exposes host system snapshots as file-like resources under `resource://` URIs.
 
 use chrono::{Duration, Utc};
-use serde_json::{json, Value};
 use rust_mcp_sdk::schema::{
-    ReadResourceContent, ReadResourceRequestParams, ReadResourceResult,
-    Resource, TextResourceContents
+    ReadResourceContent, ReadResourceRequestParams, ReadResourceResult, Resource,
+    TextResourceContents,
 };
+use serde_json::{json, Value};
 
-use crate::{
-    systemd_client::LogQuery,
-    AppState,
-};
 use crate::domain::utils::{filter_services_by_state, DEFAULT_LOG_LIMIT};
-use crate::mcp::rpc::{app_error_to_json_rpc, json_rpc_error, json_rpc_error_with_data, json_rpc_result};
+use crate::mcp::rpc::{
+    app_error_to_json_rpc, json_rpc_error, json_rpc_error_with_data, json_rpc_result,
+};
+use crate::{systemd_client::LogQuery, AppState};
 
 pub const SERVICES_RESOURCE_URI: &str = "resource://services/snapshot";
 pub const FAILED_SERVICES_RESOURCE_URI: &str = "resource://services/failed";

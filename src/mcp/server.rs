@@ -4,21 +4,22 @@
 //! negotiation (`initialize`), and tool/resource integrations routing mapping.
 
 use rust_mcp_sdk::schema::{
-    CallToolRequest, Implementation, InitializeRequest, InitializeResult, JsonrpcMessage, JsonrpcRequest,
-    ListResourcesRequest, ListResourcesResult, ListToolsRequest, ListToolsResult, PingRequest, ProtocolVersion,
-    ReadResourceRequest, ServerCapabilities, ServerCapabilitiesResources, ServerCapabilitiesTools,
+    CallToolRequest, Implementation, InitializeRequest, InitializeResult, JsonrpcMessage,
+    JsonrpcRequest, ListResourcesRequest, ListResourcesResult, ListToolsRequest, ListToolsResult,
+    PingRequest, ProtocolVersion, ReadResourceRequest, ServerCapabilities,
+    ServerCapabilitiesResources, ServerCapabilitiesTools,
 };
 use serde_json::{json, Value};
 use tracing::info;
 
-use crate::{errors::AppError, AppState};
-use crate::mcp::rpc::{
-    app_error_to_json_rpc, is_json_rpc_error, json_rpc_error, json_rpc_result, request_id_to_value,
-};
 use crate::domain::{
     resources::{build_resources_list, handle_resources_read},
     tools::{build_tools_list, handle_tools_call},
 };
+use crate::mcp::rpc::{
+    app_error_to_json_rpc, is_json_rpc_error, json_rpc_error, json_rpc_result, request_id_to_value,
+};
+use crate::{errors::AppError, AppState};
 
 pub const SUPPORTED_PROTOCOL_VERSION: &str = "2024-11-05";
 
@@ -244,8 +245,8 @@ pub fn is_sensitive_key(key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
     use super::{negotiate_protocol_version, redact_audit_params, SUPPORTED_PROTOCOL_VERSION};
+    use serde_json::json;
 
     #[test]
     fn redacts_sensitive_fields_in_audit_params() {

@@ -2,9 +2,11 @@
 //!
 //! Provides standardized mapping of internal AppErrors to valid JSON-RPC payloads.
 
-use serde_json::{json, Value};
-use rust_mcp_sdk::schema::{JsonrpcErrorResponse, JsonrpcResultResponse, RequestId, Result as McpResult, RpcError};
 use crate::errors::AppError;
+use rust_mcp_sdk::schema::{
+    JsonrpcErrorResponse, JsonrpcResultResponse, RequestId, Result as McpResult, RpcError,
+};
+use serde_json::{json, Value};
 
 pub fn is_json_rpc_error(value: &Value) -> bool {
     value.get("error").is_some()

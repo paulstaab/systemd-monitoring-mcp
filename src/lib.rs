@@ -7,13 +7,13 @@ use axum::{
 };
 use ipnet::IpNet;
 
-pub mod domain;
-pub mod http;
-pub mod mcp;
 pub mod auth;
 pub mod config;
+pub mod domain;
 pub mod errors;
+pub mod http;
 pub mod logging;
+pub mod mcp;
 pub mod systemd_client;
 
 use systemd_client::UnitProvider;

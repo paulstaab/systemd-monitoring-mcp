@@ -16,13 +16,24 @@ a Linux server over JSON-RPC.
 - Implementation plan: `docs/implementation-plan.md`
 - Entry point: `src/main.rs`
 - App wiring and route composition: `src/lib.rs`
-- Key modules:
-  - `src/config.rs`
-  - `src/auth.rs`
-  - `src/api.rs`
-  - `src/systemd_client.rs`
-  - `src/errors.rs`
-  - `src/logging.rs`
+
+## Code Structure
+The application is organized into modules with a strict separation of concerns:
+- **`src/domain/`**: The core business logic and MCP feature implementations.
+  - `tools.rs`: Logic for executable tools (e.g., `list_services`, `list_logs`) and their parameters.
+  - `resources.rs`: Logic for serving static read-only resources (e.g., `resource://services/snapshot`).
+  - `utils.rs`: Shared parsing, formatting, and validation helpers.
+- **`src/mcp/`**: Context protocol decoding and JSON-RPC implementations.
+  - `server.rs`: The MCP engine tracking capabilities validation, batch requests, notifications, and inner tool routing.
+  - `rpc.rs`: Low-level mapping of JSON-RPC semantics like standard protocol errors and request shaping.
+- **`src/http/`**: The network edge and HTTP frameworks representations.
+  - `handlers.rs`: Direct Axum handler implementations (`/health`, `/.well-known/mcp`, and the main `/mcp` listener).
+- **`src/systemd_client.rs`**: System adapters connecting the application to DBus to fetch from Systemd and Journald. Included with traits to allow mocking in test scenarios.
+- **Cross-Cutting Modules** (`src/*.rs`):
+  - `config.rs`: Extracting application configuration from environment properties securely.
+  - `auth.rs`: Access control middleware validating Bearer tokens and evaluating CIDR allowlists.
+  - `errors.rs`: Universal app errors defining business bounds instead of internal library faults.
+  - `logging.rs`: Custom structured logging and JSON-RPC parameter redaction definitions.
 
 ## Workflow
 When asked to implement new features or changes, execute the following steps
