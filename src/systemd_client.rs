@@ -461,10 +461,10 @@ fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
     }
 
     let Some(start_utc) = query.start_utc else {
-        return Err(AppError::internal("start_utc must be set".to_string()));
+        return Err(AppError::bad_request("start_utc must be set".to_string()));
     };
     let Some(end_utc) = query.end_utc else {
-        return Err(AppError::internal("end_utc must be set".to_string()));
+        return Err(AppError::bad_request("end_utc must be set".to_string()));
     };
 
     match query.order {
