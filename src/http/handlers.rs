@@ -12,7 +12,7 @@ use axum::{
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::mcp::rpc::json_rpc_error;
+use crate::mcp::rpc::{json_rpc_invalid_request, json_rpc_parse_error};
 use crate::mcp::server::handle_json_rpc_value;
 use crate::AppState;
 
@@ -51,22 +51,12 @@ pub async fn discovery() -> Json<DiscoveryResponse> {
 pub async fn mcp_endpoint(State(state): State<AppState>, body: Bytes) -> Response {
     let payload: Value = match serde_json::from_slice(&body) {
         Ok(value) => value,
-        Err(_) => {
-            return (
-                StatusCode::OK,
-                Json(json_rpc_error(None, -32700, "Parse error")),
-            )
-                .into_response()
-        }
+        Err(_) => return (StatusCode::OK, Json(json_rpc_parse_error(None))).into_response(),
     };
 
     if let Some(batch) = payload.as_array() {
         if batch.is_empty() {
-            return (
-                StatusCode::OK,
-                Json(vec![json_rpc_error(None, -32600, "Invalid Request")]),
-            )
-                .into_response();
+            return (StatusCode::OK, Json(vec![json_rpc_invalid_request(None)])).into_response();
         }
 
         let mut responses = Vec::new();

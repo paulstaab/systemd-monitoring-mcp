@@ -41,10 +41,50 @@ pub fn app_error_to_json_rpc(id: Option<Value>, err: AppError) -> Value {
                 })),
             )
         }
-        AppError::Internal { .. } | AppError::NotImplemented { .. } => {
-            json_rpc_error(id, -32603, "Internal error")
-        }
+        AppError::Internal { .. } | AppError::NotImplemented { .. } => json_rpc_internal_error(id),
     }
+}
+
+/// Creates the canonical JSON-RPC parse error (`-32700`) response.
+///
+/// Use this for malformed JSON payloads before request-envelope validation.
+pub fn json_rpc_parse_error(id: Option<Value>) -> Value {
+    json_rpc_error(id, -32700, "Parse error")
+}
+
+/// Creates the canonical JSON-RPC invalid-request error (`-32600`) response.
+///
+/// Use this when a JSON-RPC envelope is structurally invalid for dispatch.
+pub fn json_rpc_invalid_request(id: Option<Value>) -> Value {
+    json_rpc_error(id, -32600, "Invalid Request")
+}
+
+/// Creates the canonical JSON-RPC invalid-params error (`-32602`) response.
+///
+/// Use this for malformed method params that fail shape or schema checks.
+pub fn json_rpc_invalid_params(id: Option<Value>) -> Value {
+    json_rpc_error(id, -32602, "Invalid params")
+}
+
+/// Creates the canonical JSON-RPC method-not-found error (`-32601`) response.
+///
+/// Use this when no registered method/tool/resource handler matches the request.
+pub fn json_rpc_method_not_found(id: Option<Value>) -> Value {
+    json_rpc_error(id, -32601, "Method not found")
+}
+
+/// Creates a JSON-RPC method-not-found error (`-32601`) response with `data`.
+///
+/// Use this when returning stable machine-readable details for unknown methods.
+pub fn json_rpc_method_not_found_with_data(id: Option<Value>, data: Value) -> Value {
+    json_rpc_error_with_data(id, -32601, "Method not found", Some(data))
+}
+
+/// Creates the canonical JSON-RPC internal-error response (`-32603`).
+///
+/// Keep this opaque to avoid leaking internal diagnostics to clients.
+pub fn json_rpc_internal_error(id: Option<Value>) -> Value {
+    json_rpc_error(id, -32603, "Internal error")
 }
 
 /// Creates a JSON-RPC error response without additional `data` payload.

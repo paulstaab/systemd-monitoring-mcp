@@ -18,7 +18,8 @@ use crate::domain::{
     tools::{build_tools_list, handle_tools_call},
 };
 use crate::mcp::rpc::{
-    app_error_to_json_rpc, is_json_rpc_error, json_rpc_error, json_rpc_result, request_id_to_value,
+    app_error_to_json_rpc, is_json_rpc_error, json_rpc_invalid_params, json_rpc_invalid_request,
+    json_rpc_method_not_found, json_rpc_result, request_id_to_value,
 };
 use crate::{errors::AppError, AppState};
 
@@ -31,13 +32,13 @@ pub const FALLBACK_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V2025_03
 /// handling where no response body should be sent.
 pub async fn handle_json_rpc_value(state: &AppState, payload: Value) -> Option<Value> {
     if !payload.is_object() {
-        return Some(json_rpc_error(None, -32600, "Invalid Request"));
+        return Some(json_rpc_invalid_request(None));
     }
 
     let request_id = payload.get("id").cloned();
     let parsed: JsonrpcMessage = match serde_json::from_value(payload) {
         Ok(message) => message,
-        Err(_) => return Some(json_rpc_error(request_id, -32600, "Invalid Request")),
+        Err(_) => return Some(json_rpc_invalid_request(request_id)),
     };
 
     match parsed {
@@ -48,7 +49,7 @@ pub async fn handle_json_rpc_value(state: &AppState, payload: Value) -> Option<V
 
             let request_id = request_id_to_value(request.id);
             if request.method.trim().is_empty() {
-                return Some(json_rpc_error(Some(request_id), -32600, "Invalid Request"));
+                return Some(json_rpc_invalid_request(Some(request_id)));
             }
 
             Some(
@@ -76,7 +77,7 @@ pub async fn handle_json_rpc_value(state: &AppState, payload: Value) -> Option<V
             None
         }
         JsonrpcMessage::ResultResponse(_) | JsonrpcMessage::ErrorResponse(_) => {
-            Some(json_rpc_error(request_id, -32600, "Invalid Request"))
+            Some(json_rpc_invalid_request(request_id))
         }
     }
 }
@@ -101,7 +102,7 @@ pub fn validate_request_shape(request: &JsonrpcRequest) -> Result<(), Value> {
     if valid {
         Ok(())
     } else {
-        Err(json_rpc_error(request_id, -32602, "Invalid params"))
+        Err(json_rpc_invalid_params(request_id))
     }
 }
 
@@ -174,7 +175,7 @@ pub async fn handle_json_rpc_request(
             .expect("resources list result serialization"),
         ),
         "resources/read" => handle_resources_read(state, id, params).await,
-        _ => json_rpc_error(id, -32601, "Method not found"),
+        _ => json_rpc_method_not_found(id),
     };
 
     info!(
