@@ -68,10 +68,13 @@ Startup behavior:
 `list_services` behavior:
 - Must return only `*.service` units.
 - Input parameters:
+  - `scope` optional unit-manager scope selector (`system`, `user`, `both`), default `system`.
   - `state` optional service state filter (`active`, `inactive`, `failed`, `activating`, `deactivating`, `reloading`).
   - `name_contains` optional service unit-name substring filter.
   - `limit` optional result cap, default `200`, maximum `1000`.
   - `summary` optional boolean triage mode toggle.
+- If `scope=user`, results must be sourced from the user systemd manager.
+- If `scope=both`, results must combine system and user manager results.
 - If `state` is provided, only services matching that state must be returned.
 - `state` matching must be case-insensitive.
 - If `name_contains` is provided, only services whose `unit` contains that substring must be returned.
@@ -100,6 +103,7 @@ Startup behavior:
 
 `list_logs` behavior:
 - Input parameters:
+  - `scope` optional journal scope selector (`system`, `user`, `both`), default `system`.
   - `priority` optional minimum severity threshold (`0..7`) or aliases (`emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug`).
   - `unit` optional systemd unit identifier.
   - `start_utc` required RFC3339 UTC timestamp (`Z` suffix).
@@ -112,6 +116,8 @@ Startup behavior:
   - `summary` optional boolean triage mode toggle.
 - `unit` must contain only ASCII alphanumeric, `.`, `-`, `_`, `@`, and `:`.
 - `exclude_units` entries must contain only ASCII alphanumeric, `.`, `-`, `_`, `@`, and `:`.
+- If `scope=user`, journal reads must target user-unit records.
+- If `scope=both`, journal reads must include both system and user-unit records.
 - `start_utc` must be strictly less than `end_utc`.
 - Time windows larger than 7 days must be rejected unless `allow_large_window=true`.
 - Output entries must contain:
@@ -137,6 +143,7 @@ Startup behavior:
 
 `list_timers` behavior:
 - Input parameters:
+  - `scope` optional unit-manager scope selector (`system`, `user`, `both`), default `system`.
   - `limit` optional cap in range `1..1000`, default `200`.
   - `name_contains` optional case-insensitive timer unit-name substring filter.
   - `state` optional timer state filter (free-form string; matching must be case-insensitive).
@@ -147,6 +154,8 @@ Startup behavior:
   - `order` optional sort order (`asc` or `desc`), default `asc`.
 - If `state` is provided, only timers matching that state must be returned.
 - If `name_contains` is provided, only timers whose `unit` contains that substring (case-insensitive) must be returned.
+- If `scope=user`, results must be sourced from the user systemd manager.
+- If `scope=both`, results must combine system and user manager results.
 - Invalid `limit`, `sort`, or `order` values must return JSON-RPC error `-32602` with stable machine-readable error codes.
 - Invalid parameter types for any `list_timers` input must return JSON-RPC error `-32602` with stable machine-readable error codes.
 - Timer metadata collection failures must not fail the whole response; unresolved fields must be returned as `null` where applicable.

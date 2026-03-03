@@ -8,89 +8,200 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 use crate::systemd_client::{
-    JournalLogEntry, LogOrder, LogQuery, LogQueryResult, TimerStatus, UnitProvider, UnitStatus,
+    JournalLogEntry, LogOrder, LogQuery, LogQueryResult, TimerStatus, UnitProvider, UnitScope,
+    UnitStatus,
 };
 
 use super::*;
 
 struct MockProvider;
 
+fn system_services() -> Vec<UnitStatus> {
+    vec![
+        UnitStatus {
+            unit: "z.service".to_string(),
+            description: "".to_string(),
+            load_state: "loaded".to_string(),
+            active_state: "active".to_string(),
+            sub_state: "running".to_string(),
+            unit_file_state: Some("enabled".to_string()),
+            since_utc: Some("2026-02-27T00:00:00.000Z".to_string()),
+            main_pid: Some(3001),
+            exec_main_status: Some(0),
+            result: Some("success".to_string()),
+        },
+        UnitStatus {
+            unit: "a.service".to_string(),
+            description: "A service".to_string(),
+            load_state: "loaded".to_string(),
+            active_state: "inactive".to_string(),
+            sub_state: "dead".to_string(),
+            unit_file_state: Some("disabled".to_string()),
+            since_utc: None,
+            main_pid: None,
+            exec_main_status: None,
+            result: None,
+        },
+        UnitStatus {
+            unit: "b.service".to_string(),
+            description: "B service".to_string(),
+            load_state: "loaded".to_string(),
+            active_state: "failed".to_string(),
+            sub_state: "failed".to_string(),
+            unit_file_state: Some("enabled".to_string()),
+            since_utc: Some("2026-02-28T00:00:00.000Z".to_string()),
+            main_pid: Some(4001),
+            exec_main_status: Some(1),
+            result: Some("exit-code".to_string()),
+        },
+    ]
+}
+
+fn user_services() -> Vec<UnitStatus> {
+    vec![UnitStatus {
+        unit: "user-agent.service".to_string(),
+        description: "User agent".to_string(),
+        load_state: "loaded".to_string(),
+        active_state: "active".to_string(),
+        sub_state: "running".to_string(),
+        unit_file_state: Some("enabled".to_string()),
+        since_utc: Some("2026-02-27T00:10:00.000Z".to_string()),
+        main_pid: Some(5001),
+        exec_main_status: Some(0),
+        result: Some("success".to_string()),
+    }]
+}
+
+fn system_timers() -> Vec<TimerStatus> {
+    vec![
+        TimerStatus {
+            unit: "backup.timer".to_string(),
+            load_state: "loaded".to_string(),
+            active_state: "active".to_string(),
+            sub_state: "waiting".to_string(),
+            unit_file_state: Some("enabled".to_string()),
+            next_run_utc: Some("2099-01-01T00:00:00.000Z".to_string()),
+            last_run_utc: Some("2020-01-01T00:00:00.000Z".to_string()),
+            trigger_unit: Some("backup.service".to_string()),
+            persistent: Some(true),
+            result: Some("success".to_string()),
+        },
+        TimerStatus {
+            unit: "stale.timer".to_string(),
+            load_state: "loaded".to_string(),
+            active_state: "inactive".to_string(),
+            sub_state: "dead".to_string(),
+            unit_file_state: Some("disabled".to_string()),
+            next_run_utc: None,
+            last_run_utc: Some("2019-01-01T00:00:00.000Z".to_string()),
+            trigger_unit: Some("stale.service".to_string()),
+            persistent: None,
+            result: None,
+        },
+        TimerStatus {
+            unit: "overdue.timer".to_string(),
+            load_state: "loaded".to_string(),
+            active_state: "active".to_string(),
+            sub_state: "waiting".to_string(),
+            unit_file_state: Some("enabled".to_string()),
+            next_run_utc: Some("2020-01-01T00:00:00.000Z".to_string()),
+            last_run_utc: Some("2019-12-31T23:00:00.000Z".to_string()),
+            trigger_unit: Some("overdue.service".to_string()),
+            persistent: Some(true),
+            result: Some("success".to_string()),
+        },
+    ]
+}
+
+fn user_timers() -> Vec<TimerStatus> {
+    vec![TimerStatus {
+        unit: "user-sync.timer".to_string(),
+        load_state: "loaded".to_string(),
+        active_state: "active".to_string(),
+        sub_state: "waiting".to_string(),
+        unit_file_state: Some("enabled".to_string()),
+        next_run_utc: Some("2099-01-02T00:00:00.000Z".to_string()),
+        last_run_utc: Some("2026-02-27T00:00:00.000Z".to_string()),
+        trigger_unit: Some("user-sync.service".to_string()),
+        persistent: Some(false),
+        result: Some("success".to_string()),
+    }]
+}
+
+fn system_logs() -> Vec<JournalLogEntry> {
+    vec![
+        JournalLogEntry {
+            timestamp_utc: "2026-02-27T00:00:00.000Z".to_string(),
+            unit: Some("ssh.service".to_string()),
+            priority: Some("6".to_string()),
+            hostname: Some("test-host".to_string()),
+            pid: Some(2222),
+            message: Some("Started OpenSSH server".to_string()),
+            cursor: Some("s=cursor;i=12".to_string()),
+        },
+        JournalLogEntry {
+            timestamp_utc: "2026-02-27T00:30:00.000Z".to_string(),
+            unit: Some("cron.service".to_string()),
+            priority: Some("5".to_string()),
+            hostname: Some("test-host".to_string()),
+            pid: Some(3333),
+            message: Some("Cron wake-up".to_string()),
+            cursor: Some("s=cursor;i=13".to_string()),
+        },
+        JournalLogEntry {
+            timestamp_utc: "2026-02-27T00:45:00.000Z".to_string(),
+            unit: Some("app.service".to_string()),
+            priority: Some("4".to_string()),
+            hostname: Some("test-host".to_string()),
+            pid: Some(4444),
+            message: Some("Application warning".to_string()),
+            cursor: Some("s=cursor;i=14".to_string()),
+        },
+    ]
+}
+
+fn user_logs() -> Vec<JournalLogEntry> {
+    vec![JournalLogEntry {
+        timestamp_utc: "2026-02-27T00:20:00.000Z".to_string(),
+        unit: Some("user-agent.service".to_string()),
+        priority: Some("6".to_string()),
+        hostname: Some("test-host".to_string()),
+        pid: Some(5555),
+        message: Some("User agent heartbeat".to_string()),
+        cursor: Some("s=cursor;i=21".to_string()),
+    }]
+}
+
 #[async_trait::async_trait]
 impl UnitProvider for MockProvider {
-    async fn list_service_units(&self) -> Result<Vec<UnitStatus>, crate::errors::AppError> {
-        Ok(vec![
-            UnitStatus {
-                unit: "z.service".to_string(),
-                description: "".to_string(),
-                load_state: "loaded".to_string(),
-                active_state: "active".to_string(),
-                sub_state: "running".to_string(),
-                unit_file_state: Some("enabled".to_string()),
-                since_utc: Some("2026-02-27T00:00:00.000Z".to_string()),
-                main_pid: Some(3001),
-                exec_main_status: Some(0),
-                result: Some("success".to_string()),
-            },
-            UnitStatus {
-                unit: "a.service".to_string(),
-                description: "A service".to_string(),
-                load_state: "loaded".to_string(),
-                active_state: "inactive".to_string(),
-                sub_state: "dead".to_string(),
-                unit_file_state: Some("disabled".to_string()),
-                since_utc: None,
-                main_pid: None,
-                exec_main_status: None,
-                result: None,
-            },
-            UnitStatus {
-                unit: "b.service".to_string(),
-                description: "B service".to_string(),
-                load_state: "loaded".to_string(),
-                active_state: "failed".to_string(),
-                sub_state: "failed".to_string(),
-                unit_file_state: Some("enabled".to_string()),
-                since_utc: Some("2026-02-28T00:00:00.000Z".to_string()),
-                main_pid: Some(4001),
-                exec_main_status: Some(1),
-                result: Some("exit-code".to_string()),
-            },
-        ])
+    async fn list_service_units(
+        &self,
+        scope: UnitScope,
+    ) -> Result<Vec<UnitStatus>, crate::errors::AppError> {
+        Ok(match scope {
+            UnitScope::System => system_services(),
+            UnitScope::User => user_services(),
+            UnitScope::Both => {
+                let mut rows = system_services();
+                rows.extend(user_services());
+                rows
+            }
+        })
     }
 
     async fn list_journal_logs(
         &self,
         query: &LogQuery,
     ) -> Result<LogQueryResult, crate::errors::AppError> {
-        let mut entries = vec![
-            JournalLogEntry {
-                timestamp_utc: "2026-02-27T00:00:00.000Z".to_string(),
-                unit: Some("ssh.service".to_string()),
-                priority: Some("6".to_string()),
-                hostname: Some("test-host".to_string()),
-                pid: Some(2222),
-                message: Some("Started OpenSSH server".to_string()),
-                cursor: Some("s=cursor;i=12".to_string()),
-            },
-            JournalLogEntry {
-                timestamp_utc: "2026-02-27T00:30:00.000Z".to_string(),
-                unit: Some("cron.service".to_string()),
-                priority: Some("5".to_string()),
-                hostname: Some("test-host".to_string()),
-                pid: Some(3333),
-                message: Some("Cron wake-up".to_string()),
-                cursor: Some("s=cursor;i=13".to_string()),
-            },
-            JournalLogEntry {
-                timestamp_utc: "2026-02-27T00:45:00.000Z".to_string(),
-                unit: Some("app.service".to_string()),
-                priority: Some("4".to_string()),
-                hostname: Some("test-host".to_string()),
-                pid: Some(4444),
-                message: Some("Application warning".to_string()),
-                cursor: Some("s=cursor;i=14".to_string()),
-            },
-        ];
+        let mut entries = match query.scope {
+            UnitScope::System => system_logs(),
+            UnitScope::User => user_logs(),
+            UnitScope::Both => {
+                let mut rows = system_logs();
+                rows.extend(user_logs());
+                rows
+            }
+        };
 
         let scanned = entries.len();
 
@@ -123,45 +234,19 @@ impl UnitProvider for MockProvider {
         })
     }
 
-    async fn list_timer_units(&self) -> Result<Vec<TimerStatus>, crate::errors::AppError> {
-        Ok(vec![
-            TimerStatus {
-                unit: "backup.timer".to_string(),
-                load_state: "loaded".to_string(),
-                active_state: "active".to_string(),
-                sub_state: "waiting".to_string(),
-                unit_file_state: Some("enabled".to_string()),
-                next_run_utc: Some("2099-01-01T00:00:00.000Z".to_string()),
-                last_run_utc: Some("2020-01-01T00:00:00.000Z".to_string()),
-                trigger_unit: Some("backup.service".to_string()),
-                persistent: Some(true),
-                result: Some("success".to_string()),
-            },
-            TimerStatus {
-                unit: "stale.timer".to_string(),
-                load_state: "loaded".to_string(),
-                active_state: "inactive".to_string(),
-                sub_state: "dead".to_string(),
-                unit_file_state: Some("disabled".to_string()),
-                next_run_utc: None,
-                last_run_utc: Some("2019-01-01T00:00:00.000Z".to_string()),
-                trigger_unit: Some("stale.service".to_string()),
-                persistent: None,
-                result: None,
-            },
-            TimerStatus {
-                unit: "overdue.timer".to_string(),
-                load_state: "loaded".to_string(),
-                active_state: "active".to_string(),
-                sub_state: "waiting".to_string(),
-                unit_file_state: Some("enabled".to_string()),
-                next_run_utc: Some("2020-01-01T00:00:00.000Z".to_string()),
-                last_run_utc: Some("2019-12-31T23:00:00.000Z".to_string()),
-                trigger_unit: Some("overdue.service".to_string()),
-                persistent: Some(true),
-                result: Some("success".to_string()),
-            },
-        ])
+    async fn list_timer_units(
+        &self,
+        scope: UnitScope,
+    ) -> Result<Vec<TimerStatus>, crate::errors::AppError> {
+        Ok(match scope {
+            UnitScope::System => system_timers(),
+            UnitScope::User => user_timers(),
+            UnitScope::Both => {
+                let mut rows = system_timers();
+                rows.extend(user_timers());
+                rows
+            }
+        })
     }
 }
 
@@ -828,6 +913,143 @@ async fn mcp_tools_call_list_services_rejects_invalid_limit() {
     assert_eq!(body_json["id"], 36);
     assert_eq!(body_json["error"]["code"], -32602);
     assert_eq!(body_json["error"]["data"]["code"], "invalid_limit");
+}
+
+#[tokio::test]
+async fn mcp_tools_call_list_services_scope_user_returns_user_units() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/mcp")
+                .method("POST")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                .body(Body::from(
+                    r#"{"jsonrpc":"2.0","id":321,"method":"tools/call","params":{"name":"list_services","arguments":{"scope":"user"}}}"#,
+                ))
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+
+    assert_eq!(body_json["jsonrpc"], "2.0");
+    assert_eq!(body_json["id"], 321);
+    assert_eq!(body_json["result"]["structuredContent"]["returned"], 1);
+    assert_eq!(
+        body_json["result"]["structuredContent"]["services"][0]["unit"],
+        "user-agent.service"
+    );
+}
+
+#[tokio::test]
+async fn mcp_tools_call_list_timers_scope_both_returns_combined_rows() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/mcp")
+                .method("POST")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                .body(Body::from(
+                    r#"{"jsonrpc":"2.0","id":322,"method":"tools/call","params":{"name":"list_timers","arguments":{"scope":"both"}}}"#,
+                ))
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+
+    assert_eq!(body_json["jsonrpc"], "2.0");
+    assert_eq!(body_json["id"], 322);
+    assert_eq!(body_json["result"]["structuredContent"]["returned"], 4);
+    assert!(body_json["result"]["structuredContent"]["timers"]
+        .as_array()
+        .map(|rows| rows.iter().any(|row| row["unit"] == "user-sync.timer"))
+        .unwrap_or(false));
+}
+
+#[tokio::test]
+async fn mcp_tools_call_list_logs_scope_user_filters_source() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/mcp")
+                .method("POST")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                .body(Body::from(
+                    r#"{"jsonrpc":"2.0","id":323,"method":"tools/call","params":{"name":"list_logs","arguments":{"scope":"user","start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","limit":10}}}"#,
+                ))
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+
+    assert_eq!(body_json["jsonrpc"], "2.0");
+    assert_eq!(body_json["id"], 323);
+    assert_eq!(body_json["result"]["structuredContent"]["returned"], 1);
+    assert_eq!(
+        body_json["result"]["structuredContent"]["logs"][0]["unit"],
+        "user-agent.service"
+    );
+}
+
+#[tokio::test]
+async fn mcp_tools_call_list_services_rejects_invalid_scope() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/mcp")
+                .method("POST")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                .body(Body::from(
+                    r#"{"jsonrpc":"2.0","id":324,"method":"tools/call","params":{"name":"list_services","arguments":{"scope":"global"}}}"#,
+                ))
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+
+    assert_eq!(body_json["jsonrpc"], "2.0");
+    assert_eq!(body_json["id"], 324);
+    assert_eq!(body_json["error"]["code"], -32602);
+    assert_eq!(body_json["error"]["data"]["code"], "invalid_scope");
 }
 
 #[tokio::test]

@@ -43,6 +43,10 @@
 - `list_services` with unsupported `state` value returns JSON-RPC error `-32602` with stable error code `invalid_state`.
 - `list_services` with `name_contains=ssh` returns only services whose unit names contain `ssh`.
 - `list_services` with both `state` and `name_contains` applies both filters.
+- `list_services` defaults to `scope=system` when `scope` is omitted.
+- `list_services` with `scope=user` returns user-manager services.
+- `list_services` with `scope=both` returns combined system and user-manager services.
+- `list_services` with unsupported `scope` value returns JSON-RPC error `-32602` with stable error code `invalid_scope`.
 - `list_services` defaults to `limit=200` and enforces max `limit=1000`.
 - `list_services` with `limit=0` or `limit=1001` returns JSON-RPC error `-32602` with stable error code `invalid_limit`.
 - `list_services` default sorting is by `unit` ascending.
@@ -60,6 +64,10 @@
 - `list_logs` with `priority=9` returns JSON-RPC error `-32602` with stable error code `invalid_priority`.
 - `list_logs` with `unit=sshd_service-01@host:prod` returns only matching unit entries.
 - `list_logs` with disallowed unit characters (for example `/`) returns JSON-RPC error `-32602` with stable error code `invalid_unit`.
+- `list_logs` defaults to `scope=system` when `scope` is omitted.
+- `list_logs` with `scope=user` returns user-unit journal entries.
+- `list_logs` with `scope=both` returns combined system and user-unit journal entries.
+- `list_logs` with unsupported `scope` value returns JSON-RPC error `-32602` with stable error code `invalid_scope`.
 - `list_logs` with `exclude_units=["sshd.service"]` excludes matching unit entries.
 - `list_logs` with invalid `exclude_units` entry characters returns JSON-RPC error `-32602` with stable error code `invalid_unit`.
 - `list_logs` with `grep` as substring returns only matching message entries.
@@ -81,6 +89,10 @@
 - `list_timers` with `limit=0` or `limit=1001` returns JSON-RPC error `-32602` with stable error code `invalid_limit`.
 - `list_timers` with `name_contains=backup` applies case-insensitive matching on timer unit names.
 - `list_timers` with `state=ACTIVE` applies case-insensitive matching on timer state.
+- `list_timers` defaults to `scope=system` when `scope` is omitted.
+- `list_timers` with `scope=user` returns user-manager timers.
+- `list_timers` with `scope=both` returns combined system and user-manager timers.
+- `list_timers` with unsupported `scope` value returns JSON-RPC error `-32602` with stable error code `invalid_scope`.
 - `list_timers` with invalid parameter type (for example `summary="yes"`) returns JSON-RPC error `-32602` with stable error code `invalid_params` (or equivalent stable code).
 - `list_timers` with `sort=next` sorts by nearest next run; `sort=last` sorts by most recent last run; `sort=name` sorts by timer unit; `sort=state` sorts by active state.
 - `list_timers` with unsupported `sort` returns JSON-RPC error `-32602` with stable error code `invalid_sort`.

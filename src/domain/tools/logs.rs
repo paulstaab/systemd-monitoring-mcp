@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::domain::responses::{generated_at_utc_string, tool_success_response};
 use crate::domain::utils::{
-    normalize_priority, normalize_unit, parse_utc, DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT,
+    normalize_priority, normalize_scope, normalize_unit, parse_utc, DEFAULT_LOG_LIMIT,
+    MAX_LOG_LIMIT,
 };
 use crate::mcp::rpc::{app_error_to_json_rpc, json_rpc_invalid_params};
 use crate::{
@@ -196,6 +197,7 @@ pub fn build_log_query(params: LogsQueryParams) -> Result<LogQuery, AppError> {
         .collect::<Vec<_>>();
 
     Ok(LogQuery {
+        scope: normalize_scope(params.scope)?,
         priority: normalize_priority(params.priority)?,
         unit: normalize_unit(params.unit)?,
         exclude_units,

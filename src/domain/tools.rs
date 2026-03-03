@@ -21,6 +21,7 @@ pub use timers::{parse_timers_query_params, sort_timer_items, TimerItem};
 
 #[derive(Debug, Deserialize)]
 pub struct ServicesQueryParams {
+    pub scope: Option<String>,
     pub state: Option<String>,
     pub name_contains: Option<String>,
     pub limit: Option<u32>,
@@ -29,6 +30,7 @@ pub struct ServicesQueryParams {
 
 #[derive(Debug, Deserialize)]
 pub struct LogsQueryParams {
+    pub scope: Option<String>,
     pub priority: Option<String>,
     pub unit: Option<String>,
     pub start_utc: Option<String>,
@@ -47,6 +49,7 @@ pub struct LogsQueryParams {
 )]
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct ListServicesTool {
+    pub scope: Option<String>,
     pub state: Option<String>,
     pub name_contains: Option<String>,
     pub limit: Option<u32>,
@@ -59,6 +62,7 @@ pub struct ListServicesTool {
 )]
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct ListLogsTool {
+    pub scope: Option<String>,
     pub priority: Option<String>,
     pub unit: Option<String>,
     pub start_utc: String,
@@ -77,6 +81,7 @@ pub struct ListLogsTool {
 )]
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct ListTimersTool {
+    pub scope: Option<String>,
     pub limit: Option<u32>,
     pub name_contains: Option<String>,
     pub state: Option<String>,
@@ -142,6 +147,7 @@ mod tests {
     #[test]
     fn rejects_limit_above_max() {
         let query = build_log_query(LogsQueryParams {
+            scope: None,
             priority: None,
             unit: None,
             start_utc: None,
@@ -161,6 +167,7 @@ mod tests {
     #[test]
     fn rejects_non_utc_time() {
         let query = build_log_query(LogsQueryParams {
+            scope: None,
             priority: None,
             unit: None,
             start_utc: Some("2026-02-27T12:00:00+01:00".to_string()),
@@ -180,6 +187,7 @@ mod tests {
     #[test]
     fn normalizes_priority_alias() {
         let query = build_log_query(LogsQueryParams {
+            scope: None,
             priority: Some("error".to_string()),
             unit: Some("ssh_service-01@host:prod".to_string()),
             start_utc: Some("2026-02-27T00:00:00Z".to_string()),
@@ -200,6 +208,7 @@ mod tests {
     #[test]
     fn rejects_unit_with_disallowed_characters() {
         let query = build_log_query(LogsQueryParams {
+            scope: None,
             priority: None,
             unit: Some("sshd/service".to_string()),
             start_utc: Some("2026-02-27T00:00:00Z".to_string()),
@@ -219,6 +228,7 @@ mod tests {
     #[test]
     fn rejects_missing_time_range() {
         let query = build_log_query(LogsQueryParams {
+            scope: None,
             priority: None,
             unit: None,
             start_utc: None,
@@ -238,6 +248,7 @@ mod tests {
     #[test]
     fn rejects_too_large_time_range_without_override() {
         let query = build_log_query(LogsQueryParams {
+            scope: None,
             priority: None,
             unit: None,
             start_utc: Some("2026-02-01T00:00:00Z".to_string()),

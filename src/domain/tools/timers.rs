@@ -6,14 +6,16 @@ use std::collections::BTreeMap;
 
 use crate::domain::responses::{generated_at_utc_string, tool_success_response};
 use crate::domain::utils::{
-    normalize_name_contains, normalize_timer_state, normalize_timers_limit, normalize_timers_order,
-    normalize_timers_sort,
+    normalize_name_contains, normalize_scope, normalize_timer_state, normalize_timers_limit,
+    normalize_timers_order, normalize_timers_sort,
 };
 use crate::mcp::rpc::app_error_to_json_rpc;
+use crate::systemd_client::UnitScope;
 use crate::{errors::AppError, AppState};
 
 #[derive(Debug)]
 pub struct TimersQueryParams {
+    pub scope: Option<String>,
     pub limit: Option<u32>,
     pub name_contains: Option<String>,
     pub state: Option<String>,
@@ -26,6 +28,7 @@ pub struct TimersQueryParams {
 
 #[derive(Debug)]
 struct NormalizedTimersQuery {
+    scope: UnitScope,
     limit: usize,
     timer_state: Option<String>,
     name_contains: Option<String>,
@@ -152,6 +155,7 @@ pub fn parse_timers_query_params(
     let arguments = arguments.unwrap_or_default();
 
     Ok(TimersQueryParams {
+        scope: parse_optional_string_argument(&arguments, "scope")?,
         limit: parse_optional_u32_argument(&arguments, "limit")?,
         name_contains: parse_optional_string_argument(&arguments, "name_contains")?,
         state: parse_optional_string_argument(&arguments, "state")?,
@@ -171,6 +175,7 @@ fn normalize_timers_query(
     arguments: Option<serde_json::Map<String, Value>>,
 ) -> Result<NormalizedTimersQuery, AppError> {
     let query_params = parse_timers_query_params(arguments)?;
+    let scope = normalize_scope(query_params.scope)?;
     let limit = normalize_timers_limit(query_params.limit)?;
     let timer_state = normalize_timer_state(query_params.state)?;
     let name_contains =
@@ -182,6 +187,7 @@ fn normalize_timers_query(
     let order = normalize_timers_order(query_params.order)?;
 
     Ok(NormalizedTimersQuery {
+        scope,
         limit,
         timer_state,
         name_contains,
@@ -403,7 +409,7 @@ pub async fn handle_list_timers(
         Err(err) => return app_error_to_json_rpc(id, err),
     };
 
-    match state.unit_provider.list_timer_units().await {
+    match state.unit_provider.list_timer_units(normalized.scope).await {
         Ok(timers) => {
             let now = Utc::now();
             let mut timers = timers

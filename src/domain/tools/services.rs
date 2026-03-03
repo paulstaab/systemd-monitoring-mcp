@@ -5,16 +5,18 @@ use std::collections::BTreeMap;
 use crate::domain::responses::{generated_at_utc_string, tool_success_response};
 use crate::domain::utils::{
     filter_services_by_name_contains, filter_services_by_state, normalize_name_contains,
-    normalize_service_state, normalize_services_limit, sort_services,
+    normalize_scope, normalize_service_state, normalize_services_limit, sort_services,
 };
 use crate::errors::AppError;
 use crate::mcp::rpc::{app_error_to_json_rpc, json_rpc_invalid_params};
+use crate::systemd_client::UnitScope;
 use crate::AppState;
 
 use super::ServicesQueryParams;
 
 #[derive(Debug)]
 struct NormalizedServicesQuery {
+    scope: UnitScope,
     state_filter: Option<String>,
     name_contains_filter: Option<String>,
     limit: usize,
@@ -93,6 +95,7 @@ fn normalize_services_query(
         serde_json::from_value(json!(arguments.unwrap_or_default()))
             .map_err(|_| NormalizeServicesError::InvalidParams)?;
 
+    let scope = normalize_scope(query_params.scope).map_err(NormalizeServicesError::Domain)?;
     let state_filter =
         normalize_service_state(query_params.state).map_err(NormalizeServicesError::Domain)?;
     let name_contains_filter = normalize_name_contains(query_params.name_contains);
@@ -101,6 +104,7 @@ fn normalize_services_query(
     let summary_enabled = query_params.summary.unwrap_or(false);
 
     Ok(NormalizedServicesQuery {
+        scope,
         state_filter,
         name_contains_filter,
         limit,
@@ -123,7 +127,11 @@ pub async fn handle_list_services(
         Err(NormalizeServicesError::Domain(err)) => return app_error_to_json_rpc(id, err),
     };
 
-    match state.unit_provider.list_service_units().await {
+    match state
+        .unit_provider
+        .list_service_units(normalized.scope)
+        .await
+    {
         Ok(mut services) => {
             services = filter_services_by_state(services, normalized.state_filter.as_deref());
             services = filter_services_by_name_contains(

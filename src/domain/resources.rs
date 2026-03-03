@@ -11,7 +11,10 @@ use crate::domain::utils::{filter_services_by_state, DEFAULT_LOG_LIMIT};
 use crate::mcp::rpc::{
     app_error_to_json_rpc, json_rpc_invalid_params, json_rpc_method_not_found_with_data,
 };
-use crate::{systemd_client::LogQuery, AppState};
+use crate::{
+    systemd_client::{LogQuery, UnitScope},
+    AppState,
+};
 
 pub const SERVICES_RESOURCE_URI: &str = "resource://services/snapshot";
 pub const FAILED_SERVICES_RESOURCE_URI: &str = "resource://services/failed";
@@ -77,14 +80,22 @@ pub async fn handle_resources_read(
     };
 
     match resource_read.uri.as_str() {
-        SERVICES_RESOURCE_URI => match state.unit_provider.list_service_units().await {
+        SERVICES_RESOURCE_URI => match state
+            .unit_provider
+            .list_service_units(UnitScope::System)
+            .await
+        {
             Ok(services) => {
                 let structured_content = json!({ "services": services });
                 json_text_resource_response(id, SERVICES_RESOURCE_URI, structured_content)
             }
             Err(err) => app_error_to_json_rpc(id, err),
         },
-        FAILED_SERVICES_RESOURCE_URI => match state.unit_provider.list_service_units().await {
+        FAILED_SERVICES_RESOURCE_URI => match state
+            .unit_provider
+            .list_service_units(UnitScope::System)
+            .await
+        {
             Ok(services) => {
                 let services = filter_services_by_state(services, Some("failed"));
                 let structured_content = json!({ "services": services });
@@ -96,6 +107,7 @@ pub async fn handle_resources_read(
             let end_utc = Utc::now();
             let start_utc = end_utc - Duration::hours(1);
             let query = LogQuery {
+                scope: UnitScope::System,
                 priority: None,
                 unit: None,
                 exclude_units: vec![],
