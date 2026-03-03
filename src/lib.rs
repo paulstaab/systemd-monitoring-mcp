@@ -613,8 +613,14 @@ mod tests {
         assert_eq!(body_json["jsonrpc"], "2.0");
         assert_eq!(body_json["id"], 319);
         assert_eq!(body_json["result"]["structuredContent"]["returned"], 1);
-        assert_eq!(body_json["result"]["structuredContent"]["timers"][0]["unit"], "overdue.timer");
-        assert_eq!(body_json["result"]["structuredContent"]["timers"][0]["overdue"], true);
+        assert_eq!(
+            body_json["result"]["structuredContent"]["timers"][0]["unit"],
+            "overdue.timer"
+        );
+        assert_eq!(
+            body_json["result"]["structuredContent"]["timers"][0]["overdue"],
+            true
+        );
     }
 
     #[tokio::test]
@@ -646,12 +652,17 @@ mod tests {
 
         assert_eq!(body_json["jsonrpc"], "2.0");
         assert_eq!(body_json["id"], 320);
-        assert_eq!(body_json["result"]["structuredContent"]["summary"]["overdue_count"], 1);
+        assert_eq!(
+            body_json["result"]["structuredContent"]["summary"]["overdue_count"],
+            1
+        );
         assert_eq!(body_json["result"]["structuredContent"]["returned"], 1);
-        assert!(body_json["result"]["structuredContent"]["summary"]["failed_or_problem_timers"]
-            .as_array()
-            .map(|rows| rows.iter().any(|row| row["unit"] == "overdue.timer"))
-            .unwrap_or(false));
+        assert!(
+            body_json["result"]["structuredContent"]["summary"]["failed_or_problem_timers"]
+                .as_array()
+                .map(|rows| rows.iter().any(|row| row["unit"] == "overdue.timer"))
+                .unwrap_or(false)
+        );
     }
 
     #[tokio::test]
