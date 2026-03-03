@@ -155,7 +155,37 @@ tools_list_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   "${BASE_URL}/mcp")"
 [[ "$tools_list_status" == "200" ]] || fail "/mcp tools/list returned status ${tools_list_status}, expected 200"
 assert_contains "$tools_list_body" '"list_services"' "tools/list did not include list_services"
+assert_contains "$tools_list_body" '"list_timers"' "tools/list did not include list_timers"
 assert_contains "$tools_list_body" '"list_logs"' "tools/list did not include list_logs"
+
+echo "[smoke] checking POST /mcp tools/call list_timers"
+list_timers_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":125,"method":"tools/call","params":{"name":"list_timers","arguments":{"limit":5,"include_persistent":true}}}' \
+  "${BASE_URL}/mcp")"
+list_timers_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":125,"method":"tools/call","params":{"name":"list_timers","arguments":{"limit":5,"include_persistent":true}}}' \
+  "${BASE_URL}/mcp")"
+[[ "$list_timers_status" == "200" ]] || fail "tools/call list_timers returned ${list_timers_status}, expected 200"
+assert_contains "$list_timers_body" '"structuredContent"' "tools/call list_timers did not return structuredContent"
+
+echo "[smoke] checking POST /mcp tools/call list_timers overdue_only"
+list_timers_overdue_only_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":126,"method":"tools/call","params":{"name":"list_timers","arguments":{"overdue_only":true}}}' \
+  "${BASE_URL}/mcp")"
+list_timers_overdue_only_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":126,"method":"tools/call","params":{"name":"list_timers","arguments":{"overdue_only":true}}}' \
+  "${BASE_URL}/mcp")"
+[[ "$list_timers_overdue_only_status" == "200" ]] || fail "tools/call list_timers overdue_only returned ${list_timers_overdue_only_status}, expected 200"
+assert_contains "$list_timers_overdue_only_body" '"structuredContent"' "tools/call list_timers overdue_only did not return structuredContent"
+assert_contains "$list_timers_overdue_only_body" '"timers"' "tools/call list_timers overdue_only did not return timers payload"
 
 echo "[smoke] checking POST /mcp tools/call list_services with state filter"
 list_services_filtered_body="$(curl -sS -X POST \

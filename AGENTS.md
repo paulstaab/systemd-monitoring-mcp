@@ -89,6 +89,16 @@ Copy-paste one-liner:
 - Never log secrets (`MCP_API_TOKEN` or bearer token values).
 - Keep non-systemd-dependent logic testable via abstractions/mocks.
 
+## Rust Documentation Rules
+- Always add Rust outer doc comments (`///`) for every new function and for any modified function whose behavior/contract changed.
+- Doc comments must include:
+  - short purpose summary,
+  - behavior and edge-case notes,
+  - parameter/return expectations when not obvious
+- They can also include future-maintainer notes. Explain non-trivial constraints there and add relevant findings of the current session.
+- Keep doc comments synchronized with `docs/requirements.md` when function behavior is requirement-driven.
+- Prefer documenting why a constraint exists (for example, partial-result behavior, stable error codes, or sorting/null semantics), not only what the code does.
+
 ## MCP Protocol Notes
 - Prefer implementing monitoring functionality through MCP methods (`tools/list`, `tools/call`, `resources/list`, `resources/read`) instead of REST business endpoints.
 - Keep MCP transport strict to `POST /mcp` (no root `/` alias behavior).

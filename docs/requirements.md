@@ -8,12 +8,13 @@ MVP scope is limited to:
 - Exposing a standards-compliant MCP JSON-RPC endpoint.
 - Providing monitoring capabilities via MCP tools and resources.
 - Listing systemd `*.service` units and their current state.
+- Listing systemd `*.timer` units and their scheduling/trigger state.
 - Reading journald logs with optional filtering and limiting.
 - Restricting access using a static token configured via environment variable.
 
 Out of scope for MVP:
 - Starting, stopping, restarting, or modifying units.
-- Non-service unit types (sockets, timers, mounts, etc.).
+- Non-service/non-timer unit types (sockets, mounts, automounts, targets, etc.).
 
 ## 2. Runtime and Configuration
 
@@ -61,6 +62,7 @@ Startup behavior:
 - `tools/call` may include optional human-readable `content`, but `structuredContent` is required for successful tool calls.
 - Minimum required tools:
   - `list_services`: lists service-unit status records.
+  - `list_timers`: lists timer-unit scheduling and trigger state.
   - `list_logs`: queries journald logs.
 
 `list_services` behavior:
@@ -133,6 +135,54 @@ Startup behavior:
   - `top_messages` (deduplicated frequent messages, top 10)
   - `error_hotspots` (units with highest error count)
 
+`list_timers` behavior:
+- Input parameters:
+  - `limit` optional cap in range `1..1000`, default `200`.
+  - `name_contains` optional case-insensitive timer unit-name substring filter.
+  - `state` optional timer state filter (free-form string; matching must be case-insensitive).
+  - `summary` optional boolean triage mode toggle.
+  - `include_persistent` optional boolean to include persistent/missed-run capability field.
+  - `overdue_only` optional boolean to return only timers that are considered overdue.
+  - `sort` optional sort key (`next`, `last`, `name`, `state`), default `name`.
+  - `order` optional sort order (`asc` or `desc`), default `asc`.
+- If `state` is provided, only timers matching that state must be returned.
+- If `name_contains` is provided, only timers whose `unit` contains that substring (case-insensitive) must be returned.
+- Invalid `limit`, `sort`, or `order` values must return JSON-RPC error `-32602` with stable machine-readable error codes.
+- Invalid parameter types for any `list_timers` input must return JSON-RPC error `-32602` with stable machine-readable error codes.
+- Timer metadata collection failures must not fail the whole response; unresolved fields must be returned as `null` where applicable.
+- Each timer item must include at least:
+  - `unit` (string)
+  - `active_state` (string)
+  - `sub_state` (string)
+  - `next_run_utc` (RFC3339 UTC string or null)
+  - `last_run_utc` (RFC3339 UTC string or null)
+  - `time_until_next_sec` (integer or null)
+  - `time_since_last_sec` (integer or null)
+  - `trigger_unit` (string or null)
+  - `persistent` (boolean or null)
+  - `result` (string or null)
+  - `load_state` (string or null)
+  - `unit_file_state` (string or null)
+  - `overdue` (boolean)
+  - `overdue_reason` (string or null)
+- `list_timers` response metadata must include:
+  - `total_scanned` (integer)
+  - `returned` (integer)
+  - `truncated` (boolean)
+  - `generated_at_utc` (RFC3339 UTC string)
+- Overdue detection rules:
+  - A timer is considered overdue only when all are true:
+    - `next_run_utc` is known,
+    - current UTC time is later than `next_run_utc + 300 seconds` (hard-coded 5 minute grace),
+    - `active_state` is `active`.
+  - Timers with no `next_run_utc` must not be marked overdue by default (to avoid one-shot/completed false positives).
+  - When uncertainty exists, `overdue=false` and `overdue_reason` must explain the uncertainty (for example `no_next_run_known`, `not_active`, `insufficient_schedule_data`).
+- If `summary=true`, `list_timers` must return a compact summary block including:
+  - `counts_by_active_state` (map)
+  - `overdue_count` (integer)
+  - `next_due_soon` (array, top 5 upcoming timers)
+  - `failed_or_problem_timers` (array of timers with failed/problematic state/result, may be empty)
+
 ### 3.5 MCP Resources
 - The server must implement `resources/list`.
 - The server must implement `resources/read`.
@@ -162,6 +212,9 @@ CORS:
 
 Input Validation:
 - All tool and resource input parameters must be strictly validated.
+
+Tool safety constraints:
+- Timer tooling must remain read-only and must not start, stop, or modify timers/services.
 
 ## 5. Error Model
 
@@ -197,4 +250,5 @@ Sensitive data handling:
 - Never log `MCP_API_TOKEN` value.
 - Never log bearer token values from requests.
 - Never log raw credentials contained in MCP params.
+- Never expose service environment or secret values while reporting timer trigger data.
 

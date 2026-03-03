@@ -7,6 +7,8 @@ pub const MAX_LOG_LIMIT: usize = 1_000;
 pub const DEFAULT_LOG_LIMIT: usize = 200;
 pub const MAX_SERVICES_LIMIT: usize = 1_000;
 pub const DEFAULT_SERVICES_LIMIT: usize = 200;
+pub const MAX_TIMERS_LIMIT: usize = 1_000;
+pub const DEFAULT_TIMERS_LIMIT: usize = 200;
 pub const VALID_SERVICE_STATES: [&str; 6] = [
     "active",
     "inactive",
@@ -149,6 +151,99 @@ pub fn normalize_services_limit(limit: Option<u32>) -> Result<usize, AppError> {
     Ok(limit as usize)
 }
 
+/// Normalizes timer `limit` with default and hard cap enforcement.
+///
+/// Behavior:
+/// - Default: `DEFAULT_TIMERS_LIMIT` when omitted.
+/// - Valid range: `1..=1000`.
+/// - Error code: `invalid_limit` on violation.
+///
+/// Future maintainers:
+/// - Keep this in sync with requirements and tool schema declarations.
+/// - Keep the error code/message stable to avoid breaking automation clients.
+pub fn normalize_timers_limit(limit: Option<u32>) -> Result<usize, AppError> {
+    let limit = limit.unwrap_or(DEFAULT_TIMERS_LIMIT as u32);
+    if limit == 0 || limit > MAX_TIMERS_LIMIT as u32 {
+        return Err(AppError::bad_request(
+            "invalid_limit",
+            "limit must be between 1 and 1000",
+        ));
+    }
+
+    Ok(limit as usize)
+}
+
+/// Normalizes timer state filter as a non-empty, case-insensitive free-form value.
+///
+/// Unlike service-state normalization, this intentionally does not whitelist
+/// state values, per requirements.
+///
+/// Future maintainers:
+/// - If state whitelisting is introduced later, implement it here and update
+///   requirements + test cases together.
+pub fn normalize_timer_state(state: Option<String>) -> Result<Option<String>, AppError> {
+    let Some(value) = state else {
+        return Ok(None);
+    };
+
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_state",
+            "state must be a non-empty string",
+        ));
+    }
+
+    Ok(Some(normalized))
+}
+
+/// Normalizes timer sort key and applies default value.
+///
+/// Accepted values: `next`, `last`, `name`, `state`.
+/// Default: `name`.
+///
+/// Future maintainers:
+/// - Add new sort keys here before wiring runtime sorting to keep validation strict.
+pub fn normalize_timers_sort(sort: Option<String>) -> Result<String, AppError> {
+    match sort
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        None | Some("name") => Ok("name".to_string()),
+        Some("next") => Ok("next".to_string()),
+        Some("last") => Ok("last".to_string()),
+        Some("state") => Ok("state".to_string()),
+        _ => Err(AppError::bad_request(
+            "invalid_sort",
+            "sort must be one of: next, last, name, state",
+        )),
+    }
+}
+
+/// Normalizes timer sort order and applies default value.
+///
+/// Accepted values: `asc`, `desc`.
+/// Default: `asc`.
+pub fn normalize_timers_order(order: Option<String>) -> Result<String, AppError> {
+    match order
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        None | Some("asc") => Ok("asc".to_string()),
+        Some("desc") => Ok("desc".to_string()),
+        _ => Err(AppError::bad_request(
+            "invalid_order",
+            "order must be one of: asc, desc",
+        )),
+    }
+}
+
 pub fn filter_services_by_state(services: Vec<UnitStatus>, state: Option<&str>) -> Vec<UnitStatus> {
     let Some(state) = state else {
         return services;
@@ -194,7 +289,8 @@ pub fn sort_services(services: &mut [UnitStatus], failed_first: bool) {
 mod tests {
     use super::{
         filter_services_by_name_contains, filter_services_by_state, normalize_name_contains,
-        normalize_service_state, normalize_services_limit, sort_services,
+        normalize_service_state, normalize_services_limit, normalize_timer_state,
+        normalize_timers_limit, normalize_timers_order, normalize_timers_sort, sort_services,
     };
     use crate::systemd_client::UnitStatus;
 
@@ -261,6 +357,36 @@ mod tests {
     fn rejects_invalid_services_limit() {
         let error = normalize_services_limit(Some(1_001)).expect_err("invalid limit");
         assert!(error.to_string().contains("bad request"));
+    }
+
+    #[test]
+    fn rejects_invalid_timers_limit() {
+        let error = normalize_timers_limit(Some(1_001)).expect_err("invalid limit");
+        assert!(error.to_string().contains("bad request"));
+    }
+
+    #[test]
+    fn normalizes_freeform_timer_state() {
+        let state = normalize_timer_state(Some(" AcTiVe ".to_string())).expect("valid state");
+        assert_eq!(state.as_deref(), Some("active"));
+    }
+
+    #[test]
+    fn rejects_empty_timer_state() {
+        let error = normalize_timer_state(Some("   ".to_string())).expect_err("invalid state");
+        assert!(error.to_string().contains("bad request"));
+    }
+
+    #[test]
+    fn normalizes_timer_sort_and_order() {
+        assert_eq!(
+            normalize_timers_sort(Some("NeXt".to_string())).expect("sort"),
+            "next"
+        );
+        assert_eq!(
+            normalize_timers_order(Some("DeSc".to_string())).expect("order"),
+            "desc"
+        );
     }
 
     #[test]
