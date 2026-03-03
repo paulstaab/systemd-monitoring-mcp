@@ -1,6 +1,9 @@
 //! Domain-specific shared validations and formatting utilities
 
-use crate::{errors::AppError, systemd_client::UnitStatus};
+use crate::{
+    errors::AppError,
+    systemd_client::{UnitScope, UnitStatus},
+};
 use chrono::{DateTime, Utc};
 
 pub const MAX_LOG_LIMIT: usize = 1_000;
@@ -111,6 +114,28 @@ pub fn normalize_unit(unit: Option<String>) -> Result<Option<String>, AppError> 
     }
 
     Ok(Some(normalized.to_string()))
+}
+
+/// Normalizes unit-query scope across list tools.
+///
+/// Accepted values are `system`, `user`, and `both` (case-insensitive).
+/// Missing values default to `system`.
+pub fn normalize_scope(scope: Option<String>) -> Result<UnitScope, AppError> {
+    match scope
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        None | Some("system") => Ok(UnitScope::System),
+        Some("user") => Ok(UnitScope::User),
+        Some("both") => Ok(UnitScope::Both),
+        _ => Err(AppError::bad_request(
+            "invalid_scope",
+            "scope must be one of: system, user, both",
+        )),
+    }
 }
 
 /// Trims and normalizes optional substring filters.
@@ -307,15 +332,37 @@ pub fn sort_services(services: &mut [UnitStatus], failed_first: bool) {
 mod tests {
     use super::{
         filter_services_by_name_contains, filter_services_by_state, normalize_name_contains,
-        normalize_service_state, normalize_services_limit, normalize_timer_state,
+        normalize_scope, normalize_service_state, normalize_services_limit, normalize_timer_state,
         normalize_timers_limit, normalize_timers_order, normalize_timers_sort, sort_services,
     };
-    use crate::systemd_client::UnitStatus;
+    use crate::systemd_client::{UnitScope, UnitStatus};
 
     #[test]
     fn normalizes_service_state_test() {
         let state = normalize_service_state(Some(" FaILeD ".to_string())).expect("valid state");
         assert_eq!(state.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn normalizes_scope_and_defaults_to_system() {
+        assert_eq!(
+            normalize_scope(None).expect("default scope"),
+            UnitScope::System
+        );
+        assert_eq!(
+            normalize_scope(Some(" UsEr ".to_string())).expect("user scope"),
+            UnitScope::User
+        );
+        assert_eq!(
+            normalize_scope(Some("both".to_string())).expect("both scope"),
+            UnitScope::Both
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_scope_value() {
+        let error = normalize_scope(Some("global".to_string())).expect_err("invalid scope");
+        assert!(error.to_string().contains("bad request"));
     }
 
     #[test]

@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
 use regex::Regex;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use systemd::{daemon, journal};
 use thiserror::Error;
 use tracing::warn;
@@ -45,6 +45,7 @@ pub struct TimerStatus {
 
 #[derive(Debug, Clone)]
 pub struct LogQuery {
+    pub scope: UnitScope,
     pub priority: Option<String>,
     pub unit: Option<String>,
     pub exclude_units: Vec<String>,
@@ -59,6 +60,24 @@ pub struct LogQuery {
 pub enum LogOrder {
     Asc,
     Desc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitScope {
+    System,
+    User,
+    Both,
+}
+
+impl UnitScope {
+    /// Returns the stable lowercase scope name used by external API contracts.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::User => "user",
+            Self::Both => "both",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -168,13 +187,13 @@ pub async fn ensure_systemd_available() -> Result<(), SystemdAvailabilityError> 
 
 #[async_trait]
 pub trait UnitProvider: Send + Sync {
-    /// Lists systemd `*.service` units with runtime status information.
-    async fn list_service_units(&self) -> Result<Vec<UnitStatus>, AppError>;
+    /// Lists systemd `*.service` units for the requested manager scope.
+    async fn list_service_units(&self, scope: UnitScope) -> Result<Vec<UnitStatus>, AppError>;
     /// Lists systemd timer units with scheduling/trigger metadata when available.
     ///
     /// Implementations should prefer returning partial records with nullable fields
     /// over failing the full request when enrichment data is unavailable.
-    async fn list_timer_units(&self) -> Result<Vec<TimerStatus>, AppError>;
+    async fn list_timer_units(&self, scope: UnitScope) -> Result<Vec<TimerStatus>, AppError>;
     /// Lists journald log entries that satisfy the provided query constraints.
     async fn list_journal_logs(&self, query: &LogQuery) -> Result<LogQueryResult, AppError>;
 }
@@ -187,31 +206,14 @@ impl DbusSystemdClient {
     pub fn new() -> Self {
         Self
     }
-}
 
-#[async_trait]
-impl UnitProvider for DbusSystemdClient {
-    /// Lists and enriches service units from systemd over D-Bus.
-    ///
-    /// Detail enrichment is best-effort per unit; enrichment failures are logged
-    /// and do not fail the whole list response.
-    async fn list_service_units(&self) -> Result<Vec<UnitStatus>, AppError> {
-        let connection = Connection::system().await.map_err(|err| {
-            AppError::internal(format!("failed to connect to system dbus: {err}"))
-        })?;
-
-        let proxy = Proxy::new(
-            &connection,
-            "org.freedesktop.systemd1",
-            "/org/freedesktop/systemd1",
-            "org.freedesktop.systemd1.Manager",
-        )
-        .await
-        .map_err(|err| AppError::internal(format!("failed to create systemd dbus proxy: {err}")))?;
-
-        let rows: Vec<ListUnitRecord> = proxy.call("ListUnits", &()).await.map_err(|err| {
-            AppError::internal(format!("failed to list units from systemd: {err}"))
-        })?;
+    /// Lists service units for a single concrete scope over a single D-Bus connection.
+    async fn list_service_units_for_single_scope(
+        &self,
+        scope: UnitScope,
+    ) -> Result<Vec<UnitStatus>, AppError> {
+        let connection = dbus_connection_for_scope(scope).await?;
+        let rows = list_units_rows(&connection, scope).await?;
 
         let raw_units: Vec<RawUnit> = rows
             .into_iter()
@@ -264,6 +266,7 @@ impl UnitProvider for DbusSystemdClient {
                     warn!(
                         unit = %unit.unit,
                         unit_path = %unit_path.as_str(),
+                        scope = %scope.as_str(),
                         error = %err,
                         "failed to enrich service details from systemd"
                     );
@@ -274,41 +277,13 @@ impl UnitProvider for DbusSystemdClient {
         Ok(units)
     }
 
-    /// Executes journald scanning in a blocking worker to avoid async runtime stalls.
-    async fn list_journal_logs(&self, query: &LogQuery) -> Result<LogQueryResult, AppError> {
-        let query = query.clone();
-        tokio::task::spawn_blocking(move || read_journal_logs(&query))
-            .await
-            .map_err(|err| {
-                AppError::internal(format!("failed to spawn journald reader task: {err}"))
-            })?
-    }
-
-    /// Collects `*.timer` units and enriches them with timer-specific D-Bus properties.
-    ///
-    /// This method intentionally degrades gracefully: enrichment failures are logged
-    /// and represented as null fields in the resulting `TimerStatus` records.
-    ///
-    /// Future maintainers:
-    /// - Keep this behavior aligned with requirements for partial result tolerance.
-    /// - Avoid introducing hard failures for optional metadata lookups.
-    async fn list_timer_units(&self) -> Result<Vec<TimerStatus>, AppError> {
-        let connection = Connection::system().await.map_err(|err| {
-            AppError::internal(format!("failed to connect to system dbus: {err}"))
-        })?;
-
-        let proxy = Proxy::new(
-            &connection,
-            "org.freedesktop.systemd1",
-            "/org/freedesktop/systemd1",
-            "org.freedesktop.systemd1.Manager",
-        )
-        .await
-        .map_err(|err| AppError::internal(format!("failed to create systemd dbus proxy: {err}")))?;
-
-        let rows: Vec<ListUnitRecord> = proxy.call("ListUnits", &()).await.map_err(|err| {
-            AppError::internal(format!("failed to list units from systemd: {err}"))
-        })?;
+    /// Lists timer units for a single concrete scope over a single D-Bus connection.
+    async fn list_timer_units_for_single_scope(
+        &self,
+        scope: UnitScope,
+    ) -> Result<Vec<TimerStatus>, AppError> {
+        let connection = dbus_connection_for_scope(scope).await?;
+        let rows = list_units_rows(&connection, scope).await?;
 
         let raw_units: Vec<RawUnit> = rows
             .into_iter()
@@ -371,6 +346,160 @@ impl UnitProvider for DbusSystemdClient {
 
         Ok(timers)
     }
+}
+
+/// Combines system-scope and user-scope unit rows for `scope=both` behavior.
+///
+/// This helper preserves partial-result semantics: if one scope fails and the
+/// other succeeds, the successful scope rows are returned. Only when both scope
+/// fetches fail does it return an internal error.
+fn combine_scope_rows_by_key<T, F>(
+    system_result: Result<Vec<T>, AppError>,
+    user_result: Result<Vec<T>, AppError>,
+    unit_kind: &'static str,
+    key: F,
+) -> Result<Vec<T>, AppError>
+where
+    F: for<'a> Fn(&'a T) -> &'a str,
+{
+    let mut system_failed = false;
+    let mut system = match system_result {
+        Ok(rows) => rows,
+        Err(err) => {
+            system_failed = true;
+            warn!(
+                error = %err,
+                "failed to list system {} while scope=both",
+                unit_kind
+            );
+            Vec::new()
+        }
+    };
+
+    let mut user_failed = false;
+    let mut user = match user_result {
+        Ok(rows) => rows,
+        Err(err) => {
+            user_failed = true;
+            warn!(
+                error = %err,
+                "failed to list user {} while scope=both",
+                unit_kind
+            );
+            Vec::new()
+        }
+    };
+
+    if system_failed && user_failed {
+        return Err(AppError::internal(format!(
+            "failed to list {unit_kind} for both system and user scopes"
+        )));
+    }
+
+    let mut seen = HashSet::new();
+    system.append(&mut user);
+    system.retain(|row| seen.insert(key(row).to_string()));
+    system.sort_by(|left, right| key(left).cmp(key(right)));
+    Ok(system)
+}
+
+#[async_trait]
+impl UnitProvider for DbusSystemdClient {
+    /// Lists and enriches service units from systemd over D-Bus.
+    ///
+    /// Detail enrichment is best-effort per unit; enrichment failures are logged
+    /// and do not fail the whole list response.
+    async fn list_service_units(&self, scope: UnitScope) -> Result<Vec<UnitStatus>, AppError> {
+        match scope {
+            UnitScope::System | UnitScope::User => {
+                self.list_service_units_for_single_scope(scope).await
+            }
+            UnitScope::Both => combine_scope_rows_by_key(
+                self.list_service_units_for_single_scope(UnitScope::System)
+                    .await,
+                self.list_service_units_for_single_scope(UnitScope::User)
+                    .await,
+                "service units",
+                |unit| unit.unit.as_str(),
+            ),
+        }
+    }
+
+    /// Executes journald scanning in a blocking worker to avoid async runtime stalls.
+    async fn list_journal_logs(&self, query: &LogQuery) -> Result<LogQueryResult, AppError> {
+        let query = query.clone();
+        tokio::task::spawn_blocking(move || read_journal_logs(&query))
+            .await
+            .map_err(|err| {
+                AppError::internal(format!("failed to spawn journald reader task: {err}"))
+            })?
+    }
+
+    /// Collects `*.timer` units and enriches them with timer-specific D-Bus properties.
+    ///
+    /// This method intentionally degrades gracefully: enrichment failures are logged
+    /// and represented as null fields in the resulting `TimerStatus` records.
+    ///
+    /// Future maintainers:
+    /// - Keep this behavior aligned with requirements for partial result tolerance.
+    /// - Avoid introducing hard failures for optional metadata lookups.
+    async fn list_timer_units(&self, scope: UnitScope) -> Result<Vec<TimerStatus>, AppError> {
+        match scope {
+            UnitScope::System | UnitScope::User => {
+                self.list_timer_units_for_single_scope(scope).await
+            }
+            UnitScope::Both => combine_scope_rows_by_key(
+                self.list_timer_units_for_single_scope(UnitScope::System)
+                    .await,
+                self.list_timer_units_for_single_scope(UnitScope::User)
+                    .await,
+                "timer units",
+                |timer| timer.unit.as_str(),
+            ),
+        }
+    }
+}
+
+/// Opens the D-Bus connection associated with one concrete systemd manager scope.
+async fn dbus_connection_for_scope(scope: UnitScope) -> Result<Connection, AppError> {
+    match scope {
+        UnitScope::System => Connection::system()
+            .await
+            .map_err(|err| AppError::internal(format!("failed to connect to system dbus: {err}"))),
+        UnitScope::User => Connection::session().await.map_err(|err| {
+            AppError::internal(format!("failed to connect to user session dbus: {err}"))
+        }),
+        UnitScope::Both => Err(AppError::internal(
+            "dbus_connection_for_scope requires a concrete scope, got both",
+        )),
+    }
+}
+
+/// Calls `ListUnits` on the requested manager scope and returns raw D-Bus rows.
+async fn list_units_rows(
+    connection: &Connection,
+    scope: UnitScope,
+) -> Result<Vec<ListUnitRecord>, AppError> {
+    let proxy = Proxy::new(
+        connection,
+        "org.freedesktop.systemd1",
+        "/org/freedesktop/systemd1",
+        "org.freedesktop.systemd1.Manager",
+    )
+    .await
+    .map_err(|err| {
+        AppError::internal(format!(
+            "failed to create {} systemd dbus proxy: {err}",
+            scope.as_str()
+        ))
+    })?;
+
+    proxy.call("ListUnits", &()).await.map_err(|err| {
+        AppError::internal(format!(
+            "failed to list {} scope units from systemd: {err}",
+            scope.as_str()
+        ))
+    })
 }
 
 /// Maps raw D-Bus rows into service DTOs and sorts deterministically by unit name.
@@ -848,17 +977,22 @@ fn sanitize_log_message(message: Option<String>) -> Option<String> {
 ///
 /// Applies ordering and limit constraints and returns both entries and scan count.
 fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
-    let mut reader = journal::OpenOptions::default()
+    let mut open_options = journal::OpenOptions::default();
+    match query.scope {
+        UnitScope::System => {
+            open_options.system(true);
+        }
+        UnitScope::User => {
+            open_options.current_user(true);
+        }
+        UnitScope::Both => {}
+    }
+
+    let mut reader = open_options
         .open()
         .map_err(|err| AppError::internal(format!("failed to open journald reader: {err}")))?;
 
     let grep_matcher = build_grep_matcher(query.grep.as_deref())?;
-
-    if let Some(unit) = &query.unit {
-        reader
-            .match_add("_SYSTEMD_UNIT", unit.as_bytes())
-            .map_err(|err| AppError::internal(format!("failed to apply unit filter: {err}")))?;
-    }
 
     let Some(start_utc) = query.start_utc else {
         return Err(AppError::bad_request(
@@ -947,7 +1081,20 @@ fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
             continue;
         }
 
-        let unit = read_journal_field(&mut reader, "_SYSTEMD_UNIT")?;
+        let system_unit = read_journal_field(&mut reader, "_SYSTEMD_UNIT")?;
+        let user_unit = read_journal_field(&mut reader, "_SYSTEMD_USER_UNIT")?;
+        let unit = select_unit_for_scope(query.scope, system_unit, user_unit);
+
+        if let Some(unit_filter) = query.unit.as_deref() {
+            if unit
+                .as_deref()
+                .map(|entry_unit| !entry_unit.eq_ignore_ascii_case(unit_filter))
+                .unwrap_or(true)
+            {
+                continue;
+            }
+        }
+
         if let Some(unit) = unit.as_deref() {
             if query
                 .exclude_units
@@ -1003,6 +1150,19 @@ fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
     })
 }
 
+/// Selects the output unit field according to the requested journal scope.
+fn select_unit_for_scope(
+    scope: UnitScope,
+    system_unit: Option<String>,
+    user_unit: Option<String>,
+) -> Option<String> {
+    match scope {
+        UnitScope::System => system_unit,
+        UnitScope::User => user_unit,
+        UnitScope::Both => system_unit.or(user_unit),
+    }
+}
+
 /// Reads and decodes a single journald field from the current reader cursor.
 ///
 /// Uses lossy UTF-8 decoding so invalid sequences do not drop field availability.
@@ -1030,7 +1190,11 @@ fn read_journal_field(
 
 #[cfg(test)]
 mod tests {
-    use super::{map_and_sort_service_units, map_and_sort_timer_units, JournalLogEntry, RawUnit};
+    use super::{
+        combine_scope_rows_by_key, map_and_sort_service_units, map_and_sort_timer_units,
+        JournalLogEntry, RawUnit, UnitStatus,
+    };
+    use crate::errors::AppError;
     use zbus::zvariant::OwnedObjectPath;
 
     #[test]
@@ -1126,5 +1290,55 @@ mod tests {
 
         assert_eq!(sample.unit.as_deref(), Some("ssh.service"));
         assert_eq!(sample.priority.as_deref(), Some("6"));
+    }
+
+    #[test]
+    fn combine_scope_rows_both_empty_success_returns_empty() {
+        let combined = combine_scope_rows_by_key(
+            Ok(Vec::<UnitStatus>::new()),
+            Ok(Vec::<UnitStatus>::new()),
+            "service units",
+            |unit| unit.unit.as_str(),
+        )
+        .expect("empty successful scopes should remain successful");
+
+        assert!(combined.is_empty());
+    }
+
+    #[test]
+    fn combine_scope_rows_both_fail_returns_error() {
+        let combined = combine_scope_rows_by_key(
+            Err(AppError::internal("system failed")),
+            Err(AppError::internal("user failed")),
+            "service units",
+            |unit: &UnitStatus| unit.unit.as_str(),
+        );
+
+        assert!(matches!(combined, Err(AppError::Internal { .. })));
+    }
+
+    #[test]
+    fn combine_scope_rows_partial_failure_returns_successful_side() {
+        let combined = combine_scope_rows_by_key(
+            Err(AppError::internal("system failed")),
+            Ok(vec![UnitStatus {
+                unit: "user-a.service".to_string(),
+                description: "".to_string(),
+                load_state: "loaded".to_string(),
+                active_state: "active".to_string(),
+                sub_state: "running".to_string(),
+                unit_file_state: None,
+                since_utc: None,
+                main_pid: None,
+                exec_main_status: None,
+                result: None,
+            }]),
+            "service units",
+            |unit| unit.unit.as_str(),
+        )
+        .expect("partial failure should return successful side");
+
+        assert_eq!(combined.len(), 1);
+        assert_eq!(combined[0].unit, "user-a.service");
     }
 }

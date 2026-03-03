@@ -187,6 +187,20 @@ list_timers_overdue_only_status="$(curl -sS -o /dev/null -w "%{http_code}" -X PO
 assert_contains "$list_timers_overdue_only_body" '"structuredContent"' "tools/call list_timers overdue_only did not return structuredContent"
 assert_contains "$list_timers_overdue_only_body" '"timers"' "tools/call list_timers overdue_only did not return timers payload"
 
+echo "[smoke] checking POST /mcp tools/call list_timers with scope=both"
+list_timers_scope_both_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":127,"method":"tools/call","params":{"name":"list_timers","arguments":{"scope":"both","limit":5}}}' \
+  "${BASE_URL}/mcp")"
+list_timers_scope_both_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":127,"method":"tools/call","params":{"name":"list_timers","arguments":{"scope":"both","limit":5}}}' \
+  "${BASE_URL}/mcp")"
+[[ "$list_timers_scope_both_status" == "200" ]] || fail "tools/call list_timers scope both returned ${list_timers_scope_both_status}, expected 200"
+assert_contains "$list_timers_scope_both_body" '"structuredContent"' "tools/call list_timers scope both did not return structuredContent"
+
 echo "[smoke] checking POST /mcp tools/call list_services with state filter"
 list_services_filtered_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
@@ -214,6 +228,20 @@ list_services_prefix_filtered_status="$(curl -sS -o /dev/null -w "%{http_code}" 
   "${BASE_URL}/mcp")"
 [[ "$list_services_prefix_filtered_status" == "200" ]] || fail "tools/call list_services prefix filtered returned ${list_services_prefix_filtered_status}, expected 200"
 assert_contains "$list_services_prefix_filtered_body" '"structuredContent"' "tools/call list_services prefix filtered did not return structuredContent"
+
+echo "[smoke] checking POST /mcp tools/call list_services with scope=both"
+list_services_scope_both_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":128,"method":"tools/call","params":{"name":"list_services","arguments":{"scope":"both","limit":5}}}' \
+  "${BASE_URL}/mcp")"
+list_services_scope_both_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":128,"method":"tools/call","params":{"name":"list_services","arguments":{"scope":"both","limit":5}}}' \
+  "${BASE_URL}/mcp")"
+[[ "$list_services_scope_both_status" == "200" ]] || fail "tools/call list_services scope both returned ${list_services_scope_both_status}, expected 200"
+assert_contains "$list_services_scope_both_body" '"structuredContent"' "tools/call list_services scope both did not return structuredContent"
 
 echo "[smoke] checking POST /mcp tools/call list_services invalid state"
 list_services_invalid_state_body="$(curl -sS -X POST \
@@ -306,6 +334,35 @@ list_logs_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
 assert_contains "$list_logs_body" '"structuredContent"' "tools/call list_logs did not return structuredContent"
 assert_contains "$list_logs_body" '"total_scanned"' "tools/call list_logs did not include total_scanned metadata"
 assert_contains "$list_logs_body" '"window"' "tools/call list_logs did not include window metadata"
+
+echo "[smoke] checking POST /mcp tools/call list_logs with scope=both"
+list_logs_scope_both_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":129,"method":"tools/call","params":{"name":"list_logs","arguments":{"scope":"both","order":"desc","start_utc":"1970-01-01T00:00:00Z","end_utc":"1970-01-01T01:00:00Z","limit":10}}}' \
+  "${BASE_URL}/mcp")"
+list_logs_scope_both_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":129,"method":"tools/call","params":{"name":"list_logs","arguments":{"scope":"both","order":"desc","start_utc":"1970-01-01T00:00:00Z","end_utc":"1970-01-01T01:00:00Z","limit":10}}}' \
+  "${BASE_URL}/mcp")"
+[[ "$list_logs_scope_both_status" == "200" ]] || fail "tools/call list_logs scope both returned ${list_logs_scope_both_status}, expected 200"
+assert_contains "$list_logs_scope_both_body" '"structuredContent"' "tools/call list_logs scope both did not return structuredContent"
+
+echo "[smoke] checking POST /mcp tools/call list_services invalid scope"
+list_services_invalid_scope_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":130,"method":"tools/call","params":{"name":"list_services","arguments":{"scope":"global"}}}' \
+  "${BASE_URL}/mcp")"
+list_services_invalid_scope_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":130,"method":"tools/call","params":{"name":"list_services","arguments":{"scope":"global"}}}' \
+  "${BASE_URL}/mcp")"
+[[ "$list_services_invalid_scope_status" == "200" ]] || fail "tools/call list_services invalid scope returned ${list_services_invalid_scope_status}, expected 200"
+assert_contains "$list_services_invalid_scope_body" '"code":-32602' "tools/call list_services invalid scope did not return invalid params error"
+assert_contains "$list_services_invalid_scope_body" '"invalid_scope"' "tools/call list_services invalid scope did not include invalid_scope code"
 
 echo "[smoke] checking POST /mcp tools/call list_services"
 list_services_body="$(curl -sS -X POST \
