@@ -3,15 +3,13 @@
 //! Exposes host system snapshots as file-like resources under `resource://` URIs.
 
 use chrono::{Duration, Utc};
-use rust_mcp_sdk::schema::{
-    ReadResourceContent, ReadResourceRequestParams, ReadResourceResult, Resource,
-    TextResourceContents,
-};
+use rust_mcp_sdk::schema::{ReadResourceRequestParams, Resource};
 use serde_json::{json, Value};
 
+use crate::domain::responses::json_text_resource_response;
 use crate::domain::utils::{filter_services_by_state, DEFAULT_LOG_LIMIT};
 use crate::mcp::rpc::{
-    app_error_to_json_rpc, json_rpc_error, json_rpc_error_with_data, json_rpc_result,
+    app_error_to_json_rpc, json_rpc_invalid_params, json_rpc_method_not_found_with_data,
 };
 use crate::{systemd_client::LogQuery, AppState};
 
@@ -70,30 +68,19 @@ pub async fn handle_resources_read(
     params: Option<Value>,
 ) -> Value {
     let Some(raw_params) = params else {
-        return json_rpc_error(id, -32602, "Invalid params");
+        return json_rpc_invalid_params(id);
     };
 
     let resource_read: ReadResourceRequestParams = match serde_json::from_value(raw_params) {
         Ok(value) => value,
-        Err(_) => return json_rpc_error(id, -32602, "Invalid params"),
+        Err(_) => return json_rpc_invalid_params(id),
     };
 
     match resource_read.uri.as_str() {
         SERVICES_RESOURCE_URI => match state.unit_provider.list_service_units().await {
             Ok(services) => {
                 let structured_content = json!({ "services": services });
-                let result = serde_json::to_value(ReadResourceResult {
-                    contents: vec![ReadResourceContent::from(TextResourceContents {
-                        meta: None,
-                        mime_type: Some("application/json".to_string()),
-                        text: structured_content.to_string(),
-                        uri: SERVICES_RESOURCE_URI.to_string(),
-                    })],
-                    meta: None,
-                })
-                .expect("read services result serialization");
-
-                json_rpc_result(id, result)
+                json_text_resource_response(id, SERVICES_RESOURCE_URI, structured_content)
             }
             Err(err) => app_error_to_json_rpc(id, err),
         },
@@ -101,18 +88,7 @@ pub async fn handle_resources_read(
             Ok(services) => {
                 let services = filter_services_by_state(services, Some("failed"));
                 let structured_content = json!({ "services": services });
-                let result = serde_json::to_value(ReadResourceResult {
-                    contents: vec![ReadResourceContent::from(TextResourceContents {
-                        meta: None,
-                        mime_type: Some("application/json".to_string()),
-                        text: structured_content.to_string(),
-                        uri: FAILED_SERVICES_RESOURCE_URI.to_string(),
-                    })],
-                    meta: None,
-                })
-                .expect("read failed services result serialization");
-
-                json_rpc_result(id, result)
+                json_text_resource_response(id, FAILED_SERVICES_RESOURCE_URI, structured_content)
             }
             Err(err) => app_error_to_json_rpc(id, err),
         },
@@ -133,33 +109,20 @@ pub async fn handle_resources_read(
             match state.unit_provider.list_journal_logs(&query).await {
                 Ok(log_result) => {
                     let structured_content = json!({ "logs": log_result.entries });
-                    let result = serde_json::to_value(ReadResourceResult {
-                        contents: vec![ReadResourceContent::from(TextResourceContents {
-                            meta: None,
-                            mime_type: Some("application/json".to_string()),
-                            text: structured_content.to_string(),
-                            uri: LOGS_RESOURCE_URI.to_string(),
-                        })],
-                        meta: None,
-                    })
-                    .expect("read logs result serialization");
-
-                    json_rpc_result(id, result)
+                    json_text_resource_response(id, LOGS_RESOURCE_URI, structured_content)
                 }
                 Err(err) => app_error_to_json_rpc(id, err),
             }
         }
-        _ => json_rpc_error_with_data(
+        _ => json_rpc_method_not_found_with_data(
             id,
-            -32601,
-            "Method not found",
-            Some(json!({
+            json!({
                 "code": "resource_not_found",
                 "message": "unknown resource uri",
                 "details": {
                     "uri": resource_read.uri,
                 },
-            })),
+            }),
         ),
     }
 }

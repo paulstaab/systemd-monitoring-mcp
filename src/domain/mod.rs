@@ -3,5 +3,6 @@
 //! Provides the core business logic of systemd monitoring exposed over the MCP protocol
 
 pub mod resources;
+pub mod responses;
 pub mod tools;
 pub mod utils;
