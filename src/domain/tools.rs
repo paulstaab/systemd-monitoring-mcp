@@ -10,6 +10,7 @@ use rust_mcp_sdk::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::domain::utils::{
@@ -309,6 +310,14 @@ pub fn build_tools_list() -> Vec<Tool> {
     ]
 }
 
+/// Extracts an optional boolean argument from a tool-argument map.
+///
+/// Returns `Ok(None)` when the key is missing.
+/// Returns `invalid_params` when the key exists but is not a JSON boolean.
+///
+/// Future maintainers:
+/// - Keep this strict: silent coercion from strings/numbers makes MCP behavior unpredictable.
+/// - Keep error code stable (`invalid_params`) because clients may branch on it.
 fn parse_optional_bool_argument(
     arguments: &serde_json::Map<String, Value>,
     key: &str,
@@ -323,6 +332,14 @@ fn parse_optional_bool_argument(
         .ok_or_else(|| AppError::bad_request("invalid_params", "boolean parameter expected"))
 }
 
+/// Extracts an optional string argument from a tool-argument map.
+///
+/// Returns `Ok(None)` when the key is missing.
+/// Returns `invalid_params` when the key exists but is not a JSON string.
+///
+/// Future maintainers:
+/// - Do not trim/lowercase here; normalization belongs in domain-specific normalizers.
+/// - Keeping extraction and normalization separate makes validation behavior easier to test.
 fn parse_optional_string_argument(
     arguments: &serde_json::Map<String, Value>,
     key: &str,
@@ -337,6 +354,14 @@ fn parse_optional_string_argument(
         .ok_or_else(|| AppError::bad_request("invalid_params", "string parameter expected"))
 }
 
+/// Extracts an optional unsigned 32-bit integer argument from a tool-argument map.
+///
+/// Returns `Ok(None)` when the key is missing.
+/// Returns `invalid_params` when the value is not an integer or exceeds `u32` range.
+///
+/// Future maintainers:
+/// - Keep this typed as `u32` because higher-level limit normalizers already enforce business caps.
+/// - Avoid accepting floats, even whole-valued floats, to preserve strict JSON schema semantics.
 fn parse_optional_u32_argument(
     arguments: &serde_json::Map<String, Value>,
     key: &str,
@@ -357,6 +382,15 @@ fn parse_optional_u32_argument(
         .map_err(|_| AppError::bad_request("invalid_params", "integer parameter out of range"))
 }
 
+/// Parses raw MCP arguments into strongly-typed timer query parameters.
+///
+/// This parser is intentionally strict about JSON value types and delegates
+/// business-rule checks (allowed sort keys, limit ranges, etc.) to the
+/// dedicated normalizer functions.
+///
+/// Future maintainers:
+/// - Add new timer arguments here first, then wire normalizers and tests.
+/// - Keep this function free of side effects so malformed requests fail fast.
 fn parse_timers_query_params(
     arguments: Option<serde_json::Map<String, Value>>,
 ) -> Result<TimersQueryParams, AppError> {
@@ -374,12 +408,33 @@ fn parse_timers_query_params(
     })
 }
 
+/// Parses an optional RFC3339 timestamp string to UTC.
+///
+/// Returns `None` for absent or unparsable values. This is used for best-effort
+/// enrichment on timer metadata where partial data is acceptable.
+///
+/// Future maintainers:
+/// - Do not surface parsing failures from this helper as hard errors for timer listing;
+///   requirements mandate partial results with nulls rather than failing the whole response.
 fn parse_rfc3339_utc(value: Option<&str>) -> Option<DateTime<Utc>> {
     value
         .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
         .map(|value| value.with_timezone(&Utc))
 }
 
+/// Computes overdue classification for a timer using the project rules.
+///
+/// Rule summary:
+/// - Timer must be `active`.
+/// - Timer must have a known `next_run_utc`.
+/// - `now` must be strictly later than `next_run_utc + 5 minutes`.
+///
+/// Returns a tuple of `(overdue, overdue_reason)` where reason is populated for
+/// either overdue or explicit non-overdue explanations (e.g. `not_active`).
+///
+/// Future maintainers:
+/// - Keep grace period and reasons synchronized with `docs/requirements.md`.
+/// - If grace becomes configurable, centralize config lookup and keep this function pure.
 fn timer_overdue_status(
     now: DateTime<Utc>,
     timer: &crate::systemd_client::TimerStatus,
@@ -400,6 +455,19 @@ fn timer_overdue_status(
     (false, None)
 }
 
+/// Builds the API-facing timer item with derived fields.
+///
+/// Derivations include:
+/// - `time_until_next_sec`
+/// - `time_since_last_sec`
+/// - `overdue` / `overdue_reason`
+///
+/// `persistent` is conditionally included based on `include_persistent` so clients
+/// can opt into that field explicitly.
+///
+/// Future maintainers:
+/// - Keep this transformation deterministic and side-effect free for testability.
+/// - Preserve nullability semantics required by MCP output contracts.
 fn build_timer_item(
     timer: crate::systemd_client::TimerStatus,
     now: DateTime<Utc>,
@@ -434,19 +502,33 @@ fn build_timer_item(
     }
 }
 
+/// Sorts timer rows according to `sort` and `order` query options.
+///
+/// Special behavior for `next` and `last`:
+/// - `None` values are always placed last (both asc and desc).
+/// - Non-`None` values respect the requested order.
+/// - Unit name remains a deterministic tie-breaker.
+///
+/// Future maintainers:
+/// - Keep `None`-last behavior stable; clients use this for triage UX.
+/// - If adding new sort keys, ensure tie-breakers remain deterministic.
 fn sort_timer_items(items: &mut [TimerItem], sort: &str, order: &str) {
     let is_desc = order.eq_ignore_ascii_case("desc");
 
     items.sort_by(|left, right| {
         let cmp = match sort {
-            "next" => left
-                .time_until_next_sec
-                .cmp(&right.time_until_next_sec)
-                .then_with(|| left.unit.cmp(&right.unit)),
-            "last" => left
-                .time_since_last_sec
-                .cmp(&right.time_since_last_sec)
-                .then_with(|| left.unit.cmp(&right.unit)),
+            "next" => compare_optional_i64_none_last(
+                left.time_until_next_sec,
+                right.time_until_next_sec,
+                is_desc,
+            )
+            .then_with(|| left.unit.cmp(&right.unit)),
+            "last" => compare_optional_i64_none_last(
+                left.time_since_last_sec,
+                right.time_since_last_sec,
+                is_desc,
+            )
+            .then_with(|| left.unit.cmp(&right.unit)),
             "state" => left
                 .active_state
                 .cmp(&right.active_state)
@@ -454,7 +536,7 @@ fn sort_timer_items(items: &mut [TimerItem], sort: &str, order: &str) {
             _ => left.unit.cmp(&right.unit),
         };
 
-        if is_desc {
+        if is_desc && sort != "next" && sort != "last" {
             cmp.reverse()
         } else {
             cmp
@@ -462,6 +544,40 @@ fn sort_timer_items(items: &mut [TimerItem], sort: &str, order: &str) {
     });
 }
 
+/// Compares optional integer keys with `None` always ordered last.
+///
+/// This helper avoids Rust's default `Option` ordering (`None < Some`) because
+/// timer sorting semantics require unknown timestamps to sink to the bottom.
+fn compare_optional_i64_none_last(
+    left: Option<i64>,
+    right: Option<i64>,
+    descending: bool,
+) -> Ordering {
+    match (left, right) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(_), None) => Ordering::Less,
+        (Some(left), Some(right)) => {
+            if descending {
+                right.cmp(&left)
+            } else {
+                left.cmp(&right)
+            }
+        }
+    }
+}
+
+/// Builds compact timer triage summary output for `summary=true` responses.
+///
+/// Includes:
+/// - counts by active state
+/// - overdue count
+/// - top 5 upcoming timers (`next_due_soon`)
+/// - failed/problematic timer list
+///
+/// Future maintainers:
+/// - Keep this output schema stable for MCP clients that parse `structuredContent`.
+/// - Revisit truncation limits only with corresponding requirements/test updates.
 fn build_timer_summary(items: &[TimerItem]) -> TimerSummary {
     let mut counts_by_active_state = BTreeMap::new();
     for timer in items {
@@ -918,7 +1034,9 @@ pub async fn handle_tools_call(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_log_query, parse_timers_query_params, LogsQueryParams};
+    use super::{
+        build_log_query, parse_timers_query_params, sort_timer_items, LogsQueryParams, TimerItem,
+    };
     use crate::domain::utils::MAX_LOG_LIMIT;
     use serde_json::json;
 
@@ -1049,5 +1167,108 @@ mod tests {
 
         let error = parsed.expect_err("expected invalid params type");
         assert!(error.to_string().contains("bad request"));
+    }
+
+    #[test]
+    fn sorts_next_none_last_for_asc() {
+        let mut timers = vec![
+            TimerItem {
+                unit: "unknown.timer".to_string(),
+                active_state: "active".to_string(),
+                sub_state: "waiting".to_string(),
+                next_run_utc: None,
+                last_run_utc: None,
+                time_until_next_sec: None,
+                time_since_last_sec: None,
+                trigger_unit: None,
+                persistent: None,
+                result: None,
+                load_state: Some("loaded".to_string()),
+                unit_file_state: Some("enabled".to_string()),
+                overdue: false,
+                overdue_reason: Some("no_next_run_known".to_string()),
+            },
+            TimerItem {
+                unit: "soon.timer".to_string(),
+                active_state: "active".to_string(),
+                sub_state: "waiting".to_string(),
+                next_run_utc: Some("2099-01-01T00:00:00.000Z".to_string()),
+                last_run_utc: None,
+                time_until_next_sec: Some(10),
+                time_since_last_sec: None,
+                trigger_unit: None,
+                persistent: None,
+                result: None,
+                load_state: Some("loaded".to_string()),
+                unit_file_state: Some("enabled".to_string()),
+                overdue: false,
+                overdue_reason: None,
+            },
+        ];
+
+        sort_timer_items(&mut timers, "next", "asc");
+
+        assert_eq!(timers[0].unit, "soon.timer");
+        assert_eq!(timers[1].unit, "unknown.timer");
+    }
+
+    #[test]
+    fn sorts_last_none_last_for_desc() {
+        let mut timers = vec![
+            TimerItem {
+                unit: "unknown.timer".to_string(),
+                active_state: "active".to_string(),
+                sub_state: "waiting".to_string(),
+                next_run_utc: None,
+                last_run_utc: None,
+                time_until_next_sec: None,
+                time_since_last_sec: None,
+                trigger_unit: None,
+                persistent: None,
+                result: None,
+                load_state: Some("loaded".to_string()),
+                unit_file_state: Some("enabled".to_string()),
+                overdue: false,
+                overdue_reason: None,
+            },
+            TimerItem {
+                unit: "recent.timer".to_string(),
+                active_state: "active".to_string(),
+                sub_state: "waiting".to_string(),
+                next_run_utc: None,
+                last_run_utc: Some("2026-01-01T00:00:00.000Z".to_string()),
+                time_until_next_sec: None,
+                time_since_last_sec: Some(100),
+                trigger_unit: None,
+                persistent: None,
+                result: None,
+                load_state: Some("loaded".to_string()),
+                unit_file_state: Some("enabled".to_string()),
+                overdue: false,
+                overdue_reason: None,
+            },
+            TimerItem {
+                unit: "older.timer".to_string(),
+                active_state: "active".to_string(),
+                sub_state: "waiting".to_string(),
+                next_run_utc: None,
+                last_run_utc: Some("2026-01-01T00:00:00.000Z".to_string()),
+                time_until_next_sec: None,
+                time_since_last_sec: Some(200),
+                trigger_unit: None,
+                persistent: None,
+                result: None,
+                load_state: Some("loaded".to_string()),
+                unit_file_state: Some("enabled".to_string()),
+                overdue: false,
+                overdue_reason: None,
+            },
+        ];
+
+        sort_timer_items(&mut timers, "last", "desc");
+
+        assert_eq!(timers[0].unit, "older.timer");
+        assert_eq!(timers[1].unit, "recent.timer");
+        assert_eq!(timers[2].unit, "unknown.timer");
     }
 }

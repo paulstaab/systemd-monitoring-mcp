@@ -165,6 +165,10 @@ pub async fn ensure_systemd_available() -> Result<(), SystemdAvailabilityError> 
 #[async_trait]
 pub trait UnitProvider: Send + Sync {
     async fn list_service_units(&self) -> Result<Vec<UnitStatus>, AppError>;
+    /// Lists systemd timer units with scheduling/trigger metadata when available.
+    ///
+    /// Implementations should prefer returning partial records with nullable fields
+    /// over failing the full request when enrichment data is unavailable.
     async fn list_timer_units(&self) -> Result<Vec<TimerStatus>, AppError>;
     async fn list_journal_logs(&self, query: &LogQuery) -> Result<LogQueryResult, AppError>;
 }
@@ -268,6 +272,14 @@ impl UnitProvider for DbusSystemdClient {
             })?
     }
 
+    /// Collects `*.timer` units and enriches them with timer-specific D-Bus properties.
+    ///
+    /// This method intentionally degrades gracefully: enrichment failures are logged
+    /// and represented as null fields in the resulting `TimerStatus` records.
+    ///
+    /// Future maintainers:
+    /// - Keep this behavior aligned with requirements for partial result tolerance.
+    /// - Avoid introducing hard failures for optional metadata lookups.
     async fn list_timer_units(&self) -> Result<Vec<TimerStatus>, AppError> {
         let connection = Connection::system().await.map_err(|err| {
             AppError::internal(format!("failed to connect to system dbus: {err}"))
@@ -371,6 +383,10 @@ fn map_and_sort_service_units(raw_units: Vec<RawUnit>) -> Vec<UnitStatus> {
     units
 }
 
+/// Maps raw unit rows to timer DTOs and applies deterministic unit-name sorting.
+///
+/// Only `*.timer` units are retained. Enrichment fields are initialized to `None`
+/// and filled later by D-Bus detail lookups.
 fn map_and_sort_timer_units(raw_units: Vec<RawUnit>) -> Vec<TimerStatus> {
     let mut timers: Vec<TimerStatus> = raw_units
         .into_iter()
@@ -449,6 +465,14 @@ async fn fetch_service_details(
     })
 }
 
+/// Best-effort timer-detail fetch from D-Bus `Unit` and `Timer` interfaces.
+///
+/// Returns defaults (`None`) for fields that cannot be resolved, while logging
+/// failures for operators.
+///
+/// Future maintainers:
+/// - Keep this function non-fatal to preserve partial-result semantics.
+/// - If property names change, update integration tests and requirements together.
 async fn fetch_timer_details(
     connection: &Connection,
     unit_path: &OwnedObjectPath,
@@ -556,6 +580,9 @@ async fn fetch_timer_details(
     }
 }
 
+/// Reads an optional string property from a D-Bus proxy.
+///
+/// On read failure this logs and returns `None` rather than propagating an error.
 async fn read_optional_string_property(
     proxy: &Proxy<'_>,
     property_name: &str,
@@ -583,6 +610,9 @@ async fn read_optional_string_property(
     }
 }
 
+/// Reads an optional `u64` property from a D-Bus proxy.
+///
+/// On read failure this logs and returns `None` rather than propagating an error.
 async fn read_optional_u64_property(
     proxy: &Proxy<'_>,
     property_name: &str,
@@ -604,6 +634,9 @@ async fn read_optional_u64_property(
     }
 }
 
+/// Reads an optional boolean property from a D-Bus proxy.
+///
+/// On read failure this logs and returns `None` rather than propagating an error.
 async fn read_optional_bool_property(
     proxy: &Proxy<'_>,
     property_name: &str,
@@ -625,6 +658,9 @@ async fn read_optional_bool_property(
     }
 }
 
+/// Reads an optional list of object-path properties from a D-Bus proxy.
+///
+/// On read failure this logs and returns `None` rather than propagating an error.
 async fn read_optional_object_path_list_property(
     proxy: &Proxy<'_>,
     property_name: &str,

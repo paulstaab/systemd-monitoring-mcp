@@ -151,6 +151,16 @@ pub fn normalize_services_limit(limit: Option<u32>) -> Result<usize, AppError> {
     Ok(limit as usize)
 }
 
+/// Normalizes timer `limit` with default and hard cap enforcement.
+///
+/// Behavior:
+/// - Default: `DEFAULT_TIMERS_LIMIT` when omitted.
+/// - Valid range: `1..=1000`.
+/// - Error code: `invalid_limit` on violation.
+///
+/// Future maintainers:
+/// - Keep this in sync with requirements and tool schema declarations.
+/// - Keep the error code/message stable to avoid breaking automation clients.
 pub fn normalize_timers_limit(limit: Option<u32>) -> Result<usize, AppError> {
     let limit = limit.unwrap_or(DEFAULT_TIMERS_LIMIT as u32);
     if limit == 0 || limit > MAX_TIMERS_LIMIT as u32 {
@@ -163,6 +173,14 @@ pub fn normalize_timers_limit(limit: Option<u32>) -> Result<usize, AppError> {
     Ok(limit as usize)
 }
 
+/// Normalizes timer state filter as a non-empty, case-insensitive free-form value.
+///
+/// Unlike service-state normalization, this intentionally does not whitelist
+/// state values, per requirements.
+///
+/// Future maintainers:
+/// - If state whitelisting is introduced later, implement it here and update
+///   requirements + test cases together.
 pub fn normalize_timer_state(state: Option<String>) -> Result<Option<String>, AppError> {
     let Some(value) = state else {
         return Ok(None);
@@ -179,6 +197,13 @@ pub fn normalize_timer_state(state: Option<String>) -> Result<Option<String>, Ap
     Ok(Some(normalized))
 }
 
+/// Normalizes timer sort key and applies default value.
+///
+/// Accepted values: `next`, `last`, `name`, `state`.
+/// Default: `name`.
+///
+/// Future maintainers:
+/// - Add new sort keys here before wiring runtime sorting to keep validation strict.
 pub fn normalize_timers_sort(sort: Option<String>) -> Result<String, AppError> {
     match sort
         .as_deref()
@@ -198,6 +223,10 @@ pub fn normalize_timers_sort(sort: Option<String>) -> Result<String, AppError> {
     }
 }
 
+/// Normalizes timer sort order and applies default value.
+///
+/// Accepted values: `asc`, `desc`.
+/// Default: `asc`.
 pub fn normalize_timers_order(order: Option<String>) -> Result<String, AppError> {
     match order
         .as_deref()
