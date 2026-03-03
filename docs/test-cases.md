@@ -29,7 +29,7 @@
 
 ## MCP Tools
 
-- `tools/list` returns `200` JSON-RPC result containing at least `list_services` and `list_logs`.
+- `tools/list` returns `200` JSON-RPC result containing at least `list_services`, `list_timers`, and `list_logs`.
 - `tools/list` entries include strict input schema and stable output schema metadata.
 - Successful `tools/call` responses include canonical machine-readable JSON in `structuredContent`.
 - `tools/call` with unknown tool name returns JSON-RPC error `-32601` (or project-defined equivalent for tool-not-found) with stable error data.
@@ -72,6 +72,26 @@
 - Each log entry includes `timestamp_utc`, `unit`, `priority`, `hostname`, `pid`, `message`, and `cursor`.
 - `list_logs` structured output includes metadata: `total_scanned`, `returned`, `truncated`, `generated_at_utc`, and `window` object.
 - `list_logs` with `summary=true` returns compact `summary` block with `counts_by_unit`, `counts_by_priority`, `top_messages`, and `error_hotspots`.
+
+### Tool: `list_timers`
+
+- `tools/call` for `list_timers` returns only `*.timer` units.
+- Each output item includes: `unit`, `active_state`, `sub_state`, `next_run_utc`, `last_run_utc`, `time_until_next_sec`, `time_since_last_sec`, `trigger_unit`, `persistent`, `result`, `load_state`, `unit_file_state`, `overdue`, `overdue_reason`.
+- `list_timers` defaults to `limit=200` and enforces max `limit=1000`.
+- `list_timers` with `limit=0` or `limit=1001` returns JSON-RPC error `-32602` with stable error code `invalid_limit`.
+- `list_timers` with `name_contains=backup` applies case-insensitive matching on timer unit names.
+- `list_timers` with `state=ACTIVE` applies case-insensitive matching on timer state.
+- `list_timers` with invalid parameter type (for example `summary="yes"`) returns JSON-RPC error `-32602` with stable error code `invalid_params` (or equivalent stable code).
+- `list_timers` with `sort=next` sorts by nearest next run; `sort=last` sorts by most recent last run; `sort=name` sorts by timer unit; `sort=state` sorts by active state.
+- `list_timers` with unsupported `sort` returns JSON-RPC error `-32602` with stable error code `invalid_sort`.
+- `list_timers` with unsupported `order` returns JSON-RPC error `-32602` with stable error code `invalid_order`.
+- `list_timers` with `include_persistent=true` includes `persistent` values where available and preserves `null` where unavailable.
+- `list_timers` with `overdue_only=true` returns only rows where `overdue=true`.
+- Overdue semantics: timer is overdue only if `next_run_utc` is known, current time exceeds `next_run_utc` by more than 5 minutes, and `active_state=active`.
+- Timers without `next_run_utc` are not marked overdue by default and include explanatory `overdue_reason` where applicable.
+- Partial metadata failures (for example trigger or persistence not available) do not fail the call; affected fields are `null`.
+- `list_timers` structured output includes metadata: `total_scanned`, `returned`, `truncated`, `generated_at_utc`.
+- `list_timers` with `summary=true` returns compact `summary` block with `counts_by_active_state`, `overdue_count`, `next_due_soon` (top 5), and `failed_or_problem_timers`.
 
 ## MCP Resources
 

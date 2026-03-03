@@ -60,7 +60,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::systemd_client::{
-        JournalLogEntry, LogOrder, LogQuery, LogQueryResult, UnitProvider, UnitStatus,
+        JournalLogEntry, LogOrder, LogQuery, LogQueryResult, TimerStatus, UnitProvider, UnitStatus,
     };
 
     use super::*;
@@ -173,6 +173,47 @@ mod tests {
                 entries,
                 total_scanned: Some(scanned),
             })
+        }
+
+        async fn list_timer_units(&self) -> Result<Vec<TimerStatus>, crate::errors::AppError> {
+            Ok(vec![
+                TimerStatus {
+                    unit: "backup.timer".to_string(),
+                    load_state: "loaded".to_string(),
+                    active_state: "active".to_string(),
+                    sub_state: "waiting".to_string(),
+                    unit_file_state: Some("enabled".to_string()),
+                    next_run_utc: Some("2099-01-01T00:00:00.000Z".to_string()),
+                    last_run_utc: Some("2020-01-01T00:00:00.000Z".to_string()),
+                    trigger_unit: Some("backup.service".to_string()),
+                    persistent: Some(true),
+                    result: Some("success".to_string()),
+                },
+                TimerStatus {
+                    unit: "stale.timer".to_string(),
+                    load_state: "loaded".to_string(),
+                    active_state: "inactive".to_string(),
+                    sub_state: "dead".to_string(),
+                    unit_file_state: Some("disabled".to_string()),
+                    next_run_utc: None,
+                    last_run_utc: Some("2019-01-01T00:00:00.000Z".to_string()),
+                    trigger_unit: Some("stale.service".to_string()),
+                    persistent: None,
+                    result: None,
+                },
+                TimerStatus {
+                    unit: "overdue.timer".to_string(),
+                    load_state: "loaded".to_string(),
+                    active_state: "active".to_string(),
+                    sub_state: "waiting".to_string(),
+                    unit_file_state: Some("enabled".to_string()),
+                    next_run_utc: Some("2020-01-01T00:00:00.000Z".to_string()),
+                    last_run_utc: Some("2019-12-31T23:00:00.000Z".to_string()),
+                    trigger_unit: Some("overdue.service".to_string()),
+                    persistent: Some(true),
+                    result: Some("success".to_string()),
+                },
+            ])
         }
     }
 
@@ -493,7 +534,124 @@ mod tests {
         assert_eq!(body_json["id"], 2);
         assert!(body_json["result"]["tools"].is_array());
         assert_eq!(body_json["result"]["tools"][0]["name"], "list_services");
-        assert_eq!(body_json["result"]["tools"][1]["name"], "list_logs");
+        assert_eq!(body_json["result"]["tools"][1]["name"], "list_timers");
+        assert_eq!(body_json["result"]["tools"][2]["name"], "list_logs");
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_call_list_timers_returns_structured_content() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":318,"method":"tools/call","params":{"name":"list_timers","arguments":{"include_persistent":true}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 318);
+        assert!(body_json["result"]["structuredContent"]["timers"].is_array());
+        assert!(body_json["result"]["structuredContent"]["total_scanned"].is_number());
+        assert!(body_json["result"]["structuredContent"]["returned"].is_number());
+        assert!(body_json["result"]["structuredContent"]["truncated"].is_boolean());
+        assert!(body_json["result"]["structuredContent"]["generated_at_utc"].is_string());
+        assert!(body_json["result"]["structuredContent"]["timers"][0]["unit"].is_string());
+        assert!(body_json["result"]["structuredContent"]["timers"][0]["active_state"].is_string());
+        assert!(body_json["result"]["structuredContent"]["timers"][0]["overdue"].is_boolean());
+        assert!(
+            body_json["result"]["structuredContent"]["timers"][0]["time_until_next_sec"]
+                .is_number()
+                || body_json["result"]["structuredContent"]["timers"][0]["time_until_next_sec"]
+                    .is_null()
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_call_list_timers_overdue_only_filters_rows() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":319,"method":"tools/call","params":{"name":"list_timers","arguments":{"overdue_only":true}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 319);
+        assert_eq!(body_json["result"]["structuredContent"]["returned"], 1);
+        assert_eq!(body_json["result"]["structuredContent"]["timers"][0]["unit"], "overdue.timer");
+        assert_eq!(body_json["result"]["structuredContent"]["timers"][0]["overdue"], true);
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_call_list_timers_summary_with_overdue_only_returns_expected_counts() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":320,"method":"tools/call","params":{"name":"list_timers","arguments":{"summary":true,"overdue_only":true}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        let body_json: serde_json::Value =
+            serde_json::from_slice(&body).expect("valid json response");
+
+        assert_eq!(body_json["jsonrpc"], "2.0");
+        assert_eq!(body_json["id"], 320);
+        assert_eq!(body_json["result"]["structuredContent"]["summary"]["overdue_count"], 1);
+        assert_eq!(body_json["result"]["structuredContent"]["returned"], 1);
+        assert!(body_json["result"]["structuredContent"]["summary"]["failed_or_problem_timers"]
+            .as_array()
+            .map(|rows| rows.iter().any(|row| row["unit"] == "overdue.timer"))
+            .unwrap_or(false));
     }
 
     #[tokio::test]

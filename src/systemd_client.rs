@@ -29,6 +29,20 @@ pub struct UnitStatus {
     pub result: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TimerStatus {
+    pub unit: String,
+    pub load_state: String,
+    pub active_state: String,
+    pub sub_state: String,
+    pub unit_file_state: Option<String>,
+    pub next_run_utc: Option<String>,
+    pub last_run_utc: Option<String>,
+    pub trigger_unit: Option<String>,
+    pub persistent: Option<bool>,
+    pub result: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct LogQuery {
     pub priority: Option<String>,
@@ -80,6 +94,16 @@ struct ServiceDetails {
     since_utc: Option<String>,
     main_pid: Option<u32>,
     exec_main_status: Option<i32>,
+    result: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TimerDetails {
+    unit_file_state: Option<String>,
+    next_run_utc: Option<String>,
+    last_run_utc: Option<String>,
+    trigger_unit: Option<String>,
+    persistent: Option<bool>,
     result: Option<String>,
 }
 
@@ -141,6 +165,7 @@ pub async fn ensure_systemd_available() -> Result<(), SystemdAvailabilityError> 
 #[async_trait]
 pub trait UnitProvider: Send + Sync {
     async fn list_service_units(&self) -> Result<Vec<UnitStatus>, AppError>;
+    async fn list_timer_units(&self) -> Result<Vec<TimerStatus>, AppError>;
     async fn list_journal_logs(&self, query: &LogQuery) -> Result<LogQueryResult, AppError>;
 }
 
@@ -242,6 +267,86 @@ impl UnitProvider for DbusSystemdClient {
                 AppError::internal(format!("failed to spawn journald reader task: {err}"))
             })?
     }
+
+    async fn list_timer_units(&self) -> Result<Vec<TimerStatus>, AppError> {
+        let connection = Connection::system().await.map_err(|err| {
+            AppError::internal(format!("failed to connect to system dbus: {err}"))
+        })?;
+
+        let proxy = Proxy::new(
+            &connection,
+            "org.freedesktop.systemd1",
+            "/org/freedesktop/systemd1",
+            "org.freedesktop.systemd1.Manager",
+        )
+        .await
+        .map_err(|err| AppError::internal(format!("failed to create systemd dbus proxy: {err}")))?;
+
+        let rows: Vec<ListUnitRecord> = proxy.call("ListUnits", &()).await.map_err(|err| {
+            AppError::internal(format!("failed to list units from systemd: {err}"))
+        })?;
+
+        let raw_units: Vec<RawUnit> = rows
+            .into_iter()
+            .map(
+                |(
+                    name,
+                    description,
+                    load_state,
+                    active_state,
+                    sub_state,
+                    _following,
+                    unit_path,
+                    _job_id,
+                    _job_type,
+                    _job_path,
+                )| {
+                    RawUnit {
+                        name,
+                        description,
+                        load_state,
+                        active_state,
+                        sub_state,
+                        unit_path,
+                    }
+                },
+            )
+            .collect();
+
+        let mut timers = map_and_sort_timer_units(raw_units.clone());
+
+        let unit_paths: HashMap<String, OwnedObjectPath> = raw_units
+            .iter()
+            .filter(|unit| unit.name.ends_with(".timer"))
+            .map(|unit| (unit.name.clone(), unit.unit_path.clone()))
+            .collect();
+
+        let path_to_name: HashMap<String, String> = raw_units
+            .into_iter()
+            .map(|unit| (unit.unit_path.as_str().to_string(), unit.name))
+            .collect();
+
+        for timer in &mut timers {
+            let Some(unit_path) = unit_paths.get(&timer.unit) else {
+                continue;
+            };
+
+            let details = fetch_timer_details(&connection, unit_path, &path_to_name).await;
+            timer.unit_file_state = details.unit_file_state;
+            timer.next_run_utc = details.next_run_utc;
+            timer.last_run_utc = details.last_run_utc;
+            timer.trigger_unit = details.trigger_unit.or_else(|| {
+                timer
+                    .unit
+                    .strip_suffix(".timer")
+                    .map(|name| format!("{name}.service"))
+            });
+            timer.persistent = details.persistent;
+            timer.result = details.result;
+        }
+
+        Ok(timers)
+    }
 }
 
 fn map_and_sort_service_units(raw_units: Vec<RawUnit>) -> Vec<UnitStatus> {
@@ -264,6 +369,28 @@ fn map_and_sort_service_units(raw_units: Vec<RawUnit>) -> Vec<UnitStatus> {
 
     units.sort_by(|left, right| left.unit.cmp(&right.unit));
     units
+}
+
+fn map_and_sort_timer_units(raw_units: Vec<RawUnit>) -> Vec<TimerStatus> {
+    let mut timers: Vec<TimerStatus> = raw_units
+        .into_iter()
+        .filter(|unit| unit.name.ends_with(".timer"))
+        .map(|unit| TimerStatus {
+            unit: unit.name,
+            load_state: unit.load_state,
+            active_state: unit.active_state,
+            sub_state: unit.sub_state,
+            unit_file_state: None,
+            next_run_utc: None,
+            last_run_utc: None,
+            trigger_unit: None,
+            persistent: None,
+            result: None,
+        })
+        .collect();
+
+    timers.sort_by(|left, right| left.unit.cmp(&right.unit));
+    timers
 }
 
 async fn fetch_service_details(
@@ -320,6 +447,206 @@ async fn fetch_service_details(
         exec_main_status,
         result,
     })
+}
+
+async fn fetch_timer_details(
+    connection: &Connection,
+    unit_path: &OwnedObjectPath,
+    path_to_name: &HashMap<String, String>,
+) -> TimerDetails {
+    let unit_proxy = match Proxy::new(
+        connection,
+        "org.freedesktop.systemd1",
+        unit_path,
+        "org.freedesktop.systemd1.Unit",
+    )
+    .await
+    {
+        Ok(proxy) => proxy,
+        Err(err) => {
+            warn!(
+                unit_path = %unit_path.as_str(),
+                error = %err,
+                "failed to create systemd unit proxy for timer"
+            );
+            return TimerDetails::default();
+        }
+    };
+
+    let timer_proxy = match Proxy::new(
+        connection,
+        "org.freedesktop.systemd1",
+        unit_path,
+        "org.freedesktop.systemd1.Timer",
+    )
+    .await
+    {
+        Ok(proxy) => Some(proxy),
+        Err(err) => {
+            warn!(
+                unit_path = %unit_path.as_str(),
+                error = %err,
+                "failed to create systemd timer proxy"
+            );
+            None
+        }
+    };
+
+    let unit_file_state = read_optional_string_property(
+        &unit_proxy,
+        "UnitFileState",
+        "timer unit_file_state",
+        unit_path,
+    )
+    .await;
+
+    let trigger_unit = read_optional_object_path_list_property(
+        &unit_proxy,
+        "Triggers",
+        "timer triggers",
+        unit_path,
+    )
+    .await
+    .and_then(|paths| {
+        paths
+            .iter()
+            .find_map(|path| path_to_name.get(path.as_str()).cloned())
+    });
+
+    let next_run_utc = if let Some(timer_proxy) = timer_proxy.as_ref() {
+        read_optional_u64_property(
+            timer_proxy,
+            "NextElapseUSecRealtime",
+            "timer next run",
+            unit_path,
+        )
+        .await
+        .and_then(format_systemd_timestamp_usec)
+    } else {
+        None
+    };
+
+    let last_run_utc = if let Some(timer_proxy) = timer_proxy.as_ref() {
+        read_optional_u64_property(timer_proxy, "LastTriggerUSec", "timer last run", unit_path)
+            .await
+            .and_then(format_systemd_timestamp_usec)
+    } else {
+        None
+    };
+
+    let persistent = if let Some(timer_proxy) = timer_proxy.as_ref() {
+        read_optional_bool_property(timer_proxy, "Persistent", "timer persistence", unit_path).await
+    } else {
+        None
+    };
+
+    let result = if let Some(timer_proxy) = timer_proxy.as_ref() {
+        read_optional_string_property(timer_proxy, "Result", "timer result", unit_path).await
+    } else {
+        None
+    };
+
+    TimerDetails {
+        unit_file_state,
+        next_run_utc,
+        last_run_utc,
+        trigger_unit,
+        persistent,
+        result,
+    }
+}
+
+async fn read_optional_string_property(
+    proxy: &Proxy<'_>,
+    property_name: &str,
+    field_name: &str,
+    unit_path: &OwnedObjectPath,
+) -> Option<String> {
+    match proxy.get_property::<String>(property_name).await {
+        Ok(value) => {
+            if value.trim().is_empty() {
+                None
+            } else {
+                Some(value)
+            }
+        }
+        Err(err) => {
+            warn!(
+                unit_path = %unit_path.as_str(),
+                property = %property_name,
+                field = %field_name,
+                error = %err,
+                "failed to read timer property"
+            );
+            None
+        }
+    }
+}
+
+async fn read_optional_u64_property(
+    proxy: &Proxy<'_>,
+    property_name: &str,
+    field_name: &str,
+    unit_path: &OwnedObjectPath,
+) -> Option<u64> {
+    match proxy.get_property::<u64>(property_name).await {
+        Ok(value) => Some(value),
+        Err(err) => {
+            warn!(
+                unit_path = %unit_path.as_str(),
+                property = %property_name,
+                field = %field_name,
+                error = %err,
+                "failed to read timer property"
+            );
+            None
+        }
+    }
+}
+
+async fn read_optional_bool_property(
+    proxy: &Proxy<'_>,
+    property_name: &str,
+    field_name: &str,
+    unit_path: &OwnedObjectPath,
+) -> Option<bool> {
+    match proxy.get_property::<bool>(property_name).await {
+        Ok(value) => Some(value),
+        Err(err) => {
+            warn!(
+                unit_path = %unit_path.as_str(),
+                property = %property_name,
+                field = %field_name,
+                error = %err,
+                "failed to read timer property"
+            );
+            None
+        }
+    }
+}
+
+async fn read_optional_object_path_list_property(
+    proxy: &Proxy<'_>,
+    property_name: &str,
+    field_name: &str,
+    unit_path: &OwnedObjectPath,
+) -> Option<Vec<OwnedObjectPath>> {
+    match proxy
+        .get_property::<Vec<OwnedObjectPath>>(property_name)
+        .await
+    {
+        Ok(value) => Some(value),
+        Err(err) => {
+            warn!(
+                unit_path = %unit_path.as_str(),
+                property = %property_name,
+                field = %field_name,
+                error = %err,
+                "failed to read timer property"
+            );
+            None
+        }
+    }
 }
 
 async fn try_get_string_property(
@@ -632,7 +959,7 @@ fn read_journal_field(
 
 #[cfg(test)]
 mod tests {
-    use super::{map_and_sort_service_units, JournalLogEntry, RawUnit};
+    use super::{map_and_sort_service_units, map_and_sort_timer_units, JournalLogEntry, RawUnit};
     use zbus::zvariant::OwnedObjectPath;
 
     #[test]
@@ -675,6 +1002,43 @@ mod tests {
         assert_eq!(mapped[0].sub_state, "failed");
         assert_eq!(mapped[1].unit, "z.service");
         assert_eq!(mapped[1].description, "");
+    }
+
+    #[test]
+    fn filters_non_timer_and_sorts() {
+        let mapped = map_and_sort_timer_units(vec![
+            RawUnit {
+                name: "z.timer".to_string(),
+                description: "".to_string(),
+                load_state: "loaded".to_string(),
+                active_state: "active".to_string(),
+                sub_state: "waiting".to_string(),
+                unit_path: OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/z_2etimer")
+                    .expect("valid object path"),
+            },
+            RawUnit {
+                name: "a.service".to_string(),
+                description: "Service".to_string(),
+                load_state: "loaded".to_string(),
+                active_state: "active".to_string(),
+                sub_state: "running".to_string(),
+                unit_path: OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/a_2eservice")
+                    .expect("valid object path"),
+            },
+            RawUnit {
+                name: "a.timer".to_string(),
+                description: "Alpha timer".to_string(),
+                load_state: "loaded".to_string(),
+                active_state: "failed".to_string(),
+                sub_state: "failed".to_string(),
+                unit_path: OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/a_2etimer")
+                    .expect("valid object path"),
+            },
+        ]);
+
+        assert_eq!(mapped.len(), 2);
+        assert_eq!(mapped[0].unit, "a.timer");
+        assert_eq!(mapped[1].unit, "z.timer");
     }
 
     #[test]
