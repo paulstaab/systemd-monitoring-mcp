@@ -348,6 +348,61 @@ impl DbusSystemdClient {
     }
 }
 
+/// Combines system-scope and user-scope unit rows for `scope=both` behavior.
+///
+/// This helper preserves partial-result semantics: if one scope fails and the
+/// other succeeds, the successful scope rows are returned. Only when both scope
+/// fetches fail does it return an internal error.
+fn combine_scope_rows_by_key<T, F>(
+    system_result: Result<Vec<T>, AppError>,
+    user_result: Result<Vec<T>, AppError>,
+    unit_kind: &'static str,
+    key: F,
+) -> Result<Vec<T>, AppError>
+where
+    F: for<'a> Fn(&'a T) -> &'a str,
+{
+    let mut system_failed = false;
+    let mut system = match system_result {
+        Ok(rows) => rows,
+        Err(err) => {
+            system_failed = true;
+            warn!(
+                error = %err,
+                "failed to list system {} while scope=both",
+                unit_kind
+            );
+            Vec::new()
+        }
+    };
+
+    let mut user_failed = false;
+    let mut user = match user_result {
+        Ok(rows) => rows,
+        Err(err) => {
+            user_failed = true;
+            warn!(
+                error = %err,
+                "failed to list user {} while scope=both",
+                unit_kind
+            );
+            Vec::new()
+        }
+    };
+
+    if system_failed && user_failed {
+        return Err(AppError::internal(format!(
+            "failed to list {unit_kind} for both system and user scopes"
+        )));
+    }
+
+    let mut seen = HashSet::new();
+    system.append(&mut user);
+    system.retain(|row| seen.insert(key(row).to_string()));
+    system.sort_by(|left, right| key(left).cmp(key(right)));
+    Ok(system)
+}
+
 #[async_trait]
 impl UnitProvider for DbusSystemdClient {
     /// Lists and enriches service units from systemd over D-Bus.
@@ -359,40 +414,14 @@ impl UnitProvider for DbusSystemdClient {
             UnitScope::System | UnitScope::User => {
                 self.list_service_units_for_single_scope(scope).await
             }
-            UnitScope::Both => {
-                let mut system = match self
-                    .list_service_units_for_single_scope(UnitScope::System)
-                    .await
-                {
-                    Ok(units) => units,
-                    Err(err) => {
-                        warn!(error = %err, "failed to list system service units while scope=both");
-                        Vec::new()
-                    }
-                };
-                let mut user = match self
-                    .list_service_units_for_single_scope(UnitScope::User)
-                    .await
-                {
-                    Ok(units) => units,
-                    Err(err) => {
-                        warn!(error = %err, "failed to list user service units while scope=both");
-                        Vec::new()
-                    }
-                };
-
-                if system.is_empty() && user.is_empty() {
-                    return Err(AppError::internal(
-                        "failed to list units for both system and user scopes",
-                    ));
-                }
-
-                let mut seen = HashSet::new();
-                system.append(&mut user);
-                system.retain(|unit| seen.insert(unit.unit.clone()));
-                system.sort_by(|left, right| left.unit.cmp(&right.unit));
-                Ok(system)
-            }
+            UnitScope::Both => combine_scope_rows_by_key(
+                self.list_service_units_for_single_scope(UnitScope::System)
+                    .await,
+                self.list_service_units_for_single_scope(UnitScope::User)
+                    .await,
+                "service units",
+                |unit| unit.unit.as_str(),
+            ),
         }
     }
 
@@ -419,50 +448,15 @@ impl UnitProvider for DbusSystemdClient {
             UnitScope::System | UnitScope::User => {
                 self.list_timer_units_for_single_scope(scope).await
             }
-            UnitScope::Both => {
-                let mut system = match self
-                    .list_timer_units_for_single_scope(UnitScope::System)
-                    .await
-                {
-                    Ok(units) => units,
-                    Err(err) => {
-                        warn!(error = %err, "failed to list system timer units while scope=both");
-                        Vec::new()
-                    }
-                };
-                let mut user = match self
-                    .list_timer_units_for_single_scope(UnitScope::User)
-                    .await
-                {
-                    Ok(units) => units,
-                    Err(err) => {
-                        warn!(error = %err, "failed to list user timer units while scope=both");
-                        Vec::new()
-                    }
-                };
-
-                if system.is_empty() && user.is_empty() {
-                    return Err(AppError::internal(
-                        "failed to list timers for both system and user scopes",
-                    ));
-                }
-
-                let mut seen = HashSet::new();
-                system.append(&mut user);
-                system.retain(|timer| seen.insert(timer.unit.clone()));
-                system.sort_by(|left, right| left.unit.cmp(&right.unit));
-                Ok(system)
-            }
+            UnitScope::Both => combine_scope_rows_by_key(
+                self.list_timer_units_for_single_scope(UnitScope::System)
+                    .await,
+                self.list_timer_units_for_single_scope(UnitScope::User)
+                    .await,
+                "timer units",
+                |timer| timer.unit.as_str(),
+            ),
         }
-    }
-}
-
-/// Returns the stable lowercase scope name for diagnostics.
-fn dbus_scope_name(scope: UnitScope) -> &'static str {
-    match scope {
-        UnitScope::System => "system",
-        UnitScope::User => "user",
-        UnitScope::Both => "both",
     }
 }
 
@@ -496,14 +490,14 @@ async fn list_units_rows(
     .map_err(|err| {
         AppError::internal(format!(
             "failed to create {} systemd dbus proxy: {err}",
-            dbus_scope_name(scope)
+            scope.as_str()
         ))
     })?;
 
     proxy.call("ListUnits", &()).await.map_err(|err| {
         AppError::internal(format!(
             "failed to list {} scope units from systemd: {err}",
-            dbus_scope_name(scope)
+            scope.as_str()
         ))
     })
 }
@@ -1196,7 +1190,11 @@ fn read_journal_field(
 
 #[cfg(test)]
 mod tests {
-    use super::{map_and_sort_service_units, map_and_sort_timer_units, JournalLogEntry, RawUnit};
+    use super::{
+        combine_scope_rows_by_key, map_and_sort_service_units, map_and_sort_timer_units,
+        JournalLogEntry, RawUnit, UnitStatus,
+    };
+    use crate::errors::AppError;
     use zbus::zvariant::OwnedObjectPath;
 
     #[test]
@@ -1292,5 +1290,55 @@ mod tests {
 
         assert_eq!(sample.unit.as_deref(), Some("ssh.service"));
         assert_eq!(sample.priority.as_deref(), Some("6"));
+    }
+
+    #[test]
+    fn combine_scope_rows_both_empty_success_returns_empty() {
+        let combined = combine_scope_rows_by_key(
+            Ok(Vec::<UnitStatus>::new()),
+            Ok(Vec::<UnitStatus>::new()),
+            "service units",
+            |unit| unit.unit.as_str(),
+        )
+        .expect("empty successful scopes should remain successful");
+
+        assert!(combined.is_empty());
+    }
+
+    #[test]
+    fn combine_scope_rows_both_fail_returns_error() {
+        let combined = combine_scope_rows_by_key(
+            Err(AppError::internal("system failed")),
+            Err(AppError::internal("user failed")),
+            "service units",
+            |unit: &UnitStatus| unit.unit.as_str(),
+        );
+
+        assert!(matches!(combined, Err(AppError::Internal { .. })));
+    }
+
+    #[test]
+    fn combine_scope_rows_partial_failure_returns_successful_side() {
+        let combined = combine_scope_rows_by_key(
+            Err(AppError::internal("system failed")),
+            Ok(vec![UnitStatus {
+                unit: "user-a.service".to_string(),
+                description: "".to_string(),
+                load_state: "loaded".to_string(),
+                active_state: "active".to_string(),
+                sub_state: "running".to_string(),
+                unit_file_state: None,
+                since_utc: None,
+                main_pid: None,
+                exec_main_status: None,
+                result: None,
+            }]),
+            "service units",
+            |unit| unit.unit.as_str(),
+        )
+        .expect("partial failure should return successful side");
+
+        assert_eq!(combined.len(), 1);
+        assert_eq!(combined[0].unit, "user-a.service");
     }
 }
