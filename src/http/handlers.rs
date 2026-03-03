@@ -28,10 +28,14 @@ pub struct DiscoveryResponse {
     pub mcp_endpoint: &'static str,
 }
 
+/// Lightweight health handler for infrastructure liveness checks.
 pub async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
 
+/// Public MCP discovery metadata handler.
+///
+/// Exposes only package identity and MCP endpoint path.
 pub async fn discovery() -> Json<DiscoveryResponse> {
     Json(DiscoveryResponse {
         name: env!("CARGO_PKG_NAME"),
@@ -40,6 +44,10 @@ pub async fn discovery() -> Json<DiscoveryResponse> {
     })
 }
 
+/// Main MCP transport endpoint handling single and batch JSON-RPC payloads.
+///
+/// Returns JSON-RPC parse errors for invalid JSON, no-content for notification-only
+/// requests, and HTTP 200 for valid JSON-RPC responses.
 pub async fn mcp_endpoint(State(state): State<AppState>, body: Bytes) -> Response {
     let payload: Value = match serde_json::from_slice(&body) {
         Ok(value) => value,

@@ -18,6 +18,9 @@ pub const VALID_SERVICE_STATES: [&str; 6] = [
     "reloading",
 ];
 
+/// Parses optional RFC3339 UTC timestamp input.
+///
+/// Requires explicit `Z` suffix and rejects non-UTC offsets.
 pub fn parse_utc(value: &Option<String>) -> Result<Option<DateTime<Utc>>, AppError> {
     let Some(value) = value.as_deref() else {
         return Ok(None);
@@ -47,6 +50,9 @@ pub fn parse_utc(value: &Option<String>) -> Result<Option<DateTime<Utc>>, AppErr
     Ok(Some(parsed.with_timezone(&Utc)))
 }
 
+/// Normalizes journald priority filter values.
+///
+/// Accepts numeric `0..7` and common aliases, returning normalized numeric strings.
 pub fn normalize_priority(priority: Option<String>) -> Result<Option<String>, AppError> {
     let Some(value) = priority else {
         return Ok(None);
@@ -78,6 +84,7 @@ pub fn normalize_priority(priority: Option<String>) -> Result<Option<String>, Ap
     Ok(Some(mapped.to_string()))
 }
 
+/// Returns whether a unit name contains only allowed ASCII identifier characters.
 fn is_valid_unit_name_chars(s: &str) -> bool {
     s.chars().all(|character| {
         character.is_ascii_alphanumeric()
@@ -89,6 +96,7 @@ fn is_valid_unit_name_chars(s: &str) -> bool {
     })
 }
 
+/// Validates and normalizes an optional systemd unit identifier.
 pub fn normalize_unit(unit: Option<String>) -> Result<Option<String>, AppError> {
     let Some(value) = unit else {
         return Ok(None);
@@ -105,6 +113,9 @@ pub fn normalize_unit(unit: Option<String>) -> Result<Option<String>, AppError> 
     Ok(Some(normalized.to_string()))
 }
 
+/// Trims and normalizes optional substring filters.
+///
+/// Empty values are converted to `None`.
 pub fn normalize_name_contains(value: Option<String>) -> Option<String> {
     let value = value?;
 
@@ -116,6 +127,7 @@ pub fn normalize_name_contains(value: Option<String>) -> Option<String> {
     Some(normalized.to_string())
 }
 
+/// Normalizes and validates service state filters against supported states.
 pub fn normalize_service_state(state: Option<String>) -> Result<Option<String>, AppError> {
     let Some(value) = state else {
         return Ok(None);
@@ -139,6 +151,7 @@ pub fn normalize_service_state(state: Option<String>) -> Result<Option<String>, 
     Ok(Some(normalized))
 }
 
+/// Normalizes service-list limits with default and hard cap enforcement.
 pub fn normalize_services_limit(limit: Option<u32>) -> Result<usize, AppError> {
     let limit = limit.unwrap_or(DEFAULT_SERVICES_LIMIT as u32);
     if limit == 0 || limit > MAX_SERVICES_LIMIT as u32 {
@@ -244,6 +257,7 @@ pub fn normalize_timers_order(order: Option<String>) -> Result<String, AppError>
     }
 }
 
+/// Filters service rows by active state using case-insensitive matching.
 pub fn filter_services_by_state(services: Vec<UnitStatus>, state: Option<&str>) -> Vec<UnitStatus> {
     let Some(state) = state else {
         return services;
@@ -255,6 +269,7 @@ pub fn filter_services_by_state(services: Vec<UnitStatus>, state: Option<&str>) 
         .collect()
 }
 
+/// Filters service rows by unit-name substring.
 pub fn filter_services_by_name_contains(
     services: Vec<UnitStatus>,
     name_contains: Option<&str>,
@@ -269,6 +284,9 @@ pub fn filter_services_by_name_contains(
         .collect()
 }
 
+/// Sorts service rows for default and failed-first modes.
+///
+/// In failed-first mode, failed services are prioritized and then ordered by unit.
 pub fn sort_services(services: &mut [UnitStatus], failed_first: bool) {
     if failed_first {
         services.sort_by(|left, right| {

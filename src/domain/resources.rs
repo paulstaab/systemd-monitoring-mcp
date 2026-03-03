@@ -19,6 +19,9 @@ pub const SERVICES_RESOURCE_URI: &str = "resource://services/snapshot";
 pub const FAILED_SERVICES_RESOURCE_URI: &str = "resource://services/failed";
 pub const LOGS_RESOURCE_URI: &str = "resource://logs/recent";
 
+/// Builds the MCP resource catalog exposed by `resources/list`.
+///
+/// URIs are intentionally fixed and requirement-driven to keep clients stable.
 pub fn build_resources_list() -> Vec<Resource> {
     vec![
         Resource {
@@ -57,6 +60,10 @@ pub fn build_resources_list() -> Vec<Resource> {
     ]
 }
 
+/// Handles MCP `resources/read` requests for fixed snapshot resources.
+///
+/// Unknown URIs return JSON-RPC method-not-found with structured `resource_not_found`
+/// data. Successful responses use MCP `contents` shape only.
 pub async fn handle_resources_read(
     state: &AppState,
     id: Option<Value>,

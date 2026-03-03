@@ -24,6 +24,7 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Creates shared application state used by Axum handlers and middleware.
     pub fn new(api_token: String, unit_provider: Arc<dyn UnitProvider>) -> Self {
         Self {
             api_token: Arc::from(api_token),
@@ -32,6 +33,10 @@ impl AppState {
     }
 }
 
+/// Builds the HTTP router with public and authenticated MCP routes.
+///
+/// The `/mcp` route is protected by bearer auth middleware; health and discovery
+/// routes remain public.
 pub fn build_app(state: AppState) -> Router {
     let protected = Router::new()
         .route("/mcp", post(http::handlers::mcp_endpoint))

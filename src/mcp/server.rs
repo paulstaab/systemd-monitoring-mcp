@@ -25,6 +25,10 @@ use crate::{errors::AppError, AppState};
 pub const MIN_SUPPORTED_PROTOCOL_VERSION: &str = "2024-11-05";
 pub const FALLBACK_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V2025_03_26;
 
+/// Handles a single JSON value as an MCP JSON-RPC message.
+///
+/// Supports request and notification flows and returns `None` for notification-only
+/// handling where no response body should be sent.
 pub async fn handle_json_rpc_value(state: &AppState, payload: Value) -> Option<Value> {
     if !payload.is_object() {
         return Some(json_rpc_error(None, -32600, "Invalid Request"));
@@ -77,6 +81,9 @@ pub async fn handle_json_rpc_value(state: &AppState, payload: Value) -> Option<V
     }
 }
 
+/// Validates method-specific request envelope shape before dispatch.
+///
+/// Returns JSON-RPC `-32602` when method params do not satisfy expected schema.
 pub fn validate_request_shape(request: &JsonrpcRequest) -> Result<(), Value> {
     let payload = serde_json::to_value(request).expect("jsonrpc request serialization");
     let request_id = Some(request_id_to_value(request.id.clone()));
@@ -98,6 +105,9 @@ pub fn validate_request_shape(request: &JsonrpcRequest) -> Result<(), Value> {
     }
 }
 
+/// Executes a parsed JSON-RPC request method and returns a response payload.
+///
+/// Also emits MCP audit logs with redacted parameter content.
 pub async fn handle_json_rpc_request(
     state: &AppState,
     id: Option<Value>,
@@ -177,6 +187,10 @@ pub async fn handle_json_rpc_request(
     response
 }
 
+/// Negotiates protocol version from initialize request params.
+///
+/// Accepts known versions directly and falls back to the configured fallback
+/// for unknown-but-newer date versions above the minimum supported version.
 pub fn negotiate_protocol_version(params: Option<&Value>) -> Result<ProtocolVersion, AppError> {
     let offered_version = params
         .and_then(Value::as_object)
@@ -215,6 +229,9 @@ pub fn negotiate_protocol_version(params: Option<&Value>) -> Result<ProtocolVers
     ))
 }
 
+/// Parses protocol version strings in `YYYY-MM-DD` format.
+///
+/// Returns `None` for malformed or invalid calendar dates.
 fn parse_protocol_version_date(version: &str) -> Option<NaiveDate> {
     if version.len() != 10 {
         return None;
@@ -244,10 +261,12 @@ fn parse_protocol_version_date(version: &str) -> Option<NaiveDate> {
     NaiveDate::from_ymd_opt(year, month, day)
 }
 
+/// Redacts sensitive values in optional audit parameter payloads.
 pub fn redact_audit_params(params: Option<&Value>) -> Value {
     params.map(redact_audit_value).unwrap_or(Value::Null)
 }
 
+/// Recursively redacts sensitive keys from JSON values for logging safety.
 pub fn redact_audit_value(value: &Value) -> Value {
     match value {
         Value::Object(map) => Value::Object(
@@ -266,6 +285,9 @@ pub fn redact_audit_value(value: &Value) -> Value {
     }
 }
 
+/// Returns whether a key should be treated as sensitive for audit redaction.
+///
+/// Matches exact credential terms and common credential-related substrings.
 pub fn is_sensitive_key(key: &str) -> bool {
     let normalized = key.trim().to_ascii_lowercase();
     matches!(

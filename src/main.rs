@@ -10,6 +10,8 @@ use systemd_monitoring_mcp::{
 use tracing::info;
 
 #[tokio::main]
+/// Process entrypoint: initializes logging/config, validates systemd availability,
+/// and starts the Axum server.
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     logging::init_logging();
 

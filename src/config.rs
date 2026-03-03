@@ -12,6 +12,9 @@ struct RawConfig {
 }
 
 impl RawConfig {
+    /// Loads raw environment configuration without validation.
+    ///
+    /// Validation and defaults are applied later in `Config::parse`.
     fn from_env() -> Self {
         Self {
             api_token: env::var("MCP_API_TOKEN").ok(),
@@ -41,10 +44,17 @@ pub enum ConfigError {
 }
 
 impl Config {
+    /// Builds validated runtime config from environment variables.
+    ///
+    /// Applies defaults for optional bind settings and validates token length.
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::parse(RawConfig::from_env())
     }
 
+    /// Validates and normalizes a raw config snapshot.
+    ///
+    /// Ensures required token constraints and that bind address/port can form
+    /// a valid socket.
     fn parse(raw: RawConfig) -> Result<Self, ConfigError> {
         let api_token = raw
             .api_token
@@ -83,6 +93,9 @@ impl Config {
         Ok(config)
     }
 
+    /// Converts bind host/port settings into a concrete socket address.
+    ///
+    /// Returns `InvalidSocket` when address formatting or parsing fails.
     pub fn bind_socket(&self) -> Result<SocketAddr, ConfigError> {
         format!("{}:{}", self.bind_addr, self.bind_port)
             .parse::<SocketAddr>()

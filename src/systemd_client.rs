@@ -134,6 +134,10 @@ pub enum SystemdAvailabilityError {
     ManagerQuery(String),
 }
 
+/// Verifies that systemd is reachable in the current runtime environment.
+///
+/// This performs boot-state validation, D-Bus connectivity checks, and a
+/// minimal manager call to confirm systemd manager responsiveness.
 pub async fn ensure_systemd_available() -> Result<(), SystemdAvailabilityError> {
     let is_booted =
         daemon::booted().map_err(|err| SystemdAvailabilityError::BootState(err.to_string()))?;
@@ -164,12 +168,14 @@ pub async fn ensure_systemd_available() -> Result<(), SystemdAvailabilityError> 
 
 #[async_trait]
 pub trait UnitProvider: Send + Sync {
+    /// Lists systemd `*.service` units with runtime status information.
     async fn list_service_units(&self) -> Result<Vec<UnitStatus>, AppError>;
     /// Lists systemd timer units with scheduling/trigger metadata when available.
     ///
     /// Implementations should prefer returning partial records with nullable fields
     /// over failing the full request when enrichment data is unavailable.
     async fn list_timer_units(&self) -> Result<Vec<TimerStatus>, AppError>;
+    /// Lists journald log entries that satisfy the provided query constraints.
     async fn list_journal_logs(&self, query: &LogQuery) -> Result<LogQueryResult, AppError>;
 }
 
@@ -177,6 +183,7 @@ pub trait UnitProvider: Send + Sync {
 pub struct DbusSystemdClient;
 
 impl DbusSystemdClient {
+    /// Creates a new D-Bus backed systemd client adapter instance.
     pub fn new() -> Self {
         Self
     }
@@ -184,6 +191,10 @@ impl DbusSystemdClient {
 
 #[async_trait]
 impl UnitProvider for DbusSystemdClient {
+    /// Lists and enriches service units from systemd over D-Bus.
+    ///
+    /// Detail enrichment is best-effort per unit; enrichment failures are logged
+    /// and do not fail the whole list response.
     async fn list_service_units(&self) -> Result<Vec<UnitStatus>, AppError> {
         let connection = Connection::system().await.map_err(|err| {
             AppError::internal(format!("failed to connect to system dbus: {err}"))
@@ -263,6 +274,7 @@ impl UnitProvider for DbusSystemdClient {
         Ok(units)
     }
 
+    /// Executes journald scanning in a blocking worker to avoid async runtime stalls.
     async fn list_journal_logs(&self, query: &LogQuery) -> Result<LogQueryResult, AppError> {
         let query = query.clone();
         tokio::task::spawn_blocking(move || read_journal_logs(&query))
@@ -361,6 +373,9 @@ impl UnitProvider for DbusSystemdClient {
     }
 }
 
+/// Maps raw D-Bus rows into service DTOs and sorts deterministically by unit name.
+///
+/// Non-service units are filtered out.
 fn map_and_sort_service_units(raw_units: Vec<RawUnit>) -> Vec<UnitStatus> {
     let mut units: Vec<UnitStatus> = raw_units
         .into_iter()
@@ -409,6 +424,9 @@ fn map_and_sort_timer_units(raw_units: Vec<RawUnit>) -> Vec<TimerStatus> {
     timers
 }
 
+/// Fetches service-specific D-Bus properties for a service unit path.
+///
+/// Returned values are used to enrich base service rows with operational metadata.
 async fn fetch_service_details(
     connection: &Connection,
     unit_path: &OwnedObjectPath,
@@ -685,6 +703,7 @@ async fn read_optional_object_path_list_property(
     }
 }
 
+/// Reads a D-Bus string property and maps blank strings to `None`.
 async fn try_get_string_property(
     proxy: &Proxy<'_>,
     property_name: &str,
@@ -706,6 +725,7 @@ async fn try_get_string_property(
         })
 }
 
+/// Reads a D-Bus `u64` property value.
 async fn try_get_u64_property(
     proxy: &Proxy<'_>,
     property_name: &str,
@@ -721,6 +741,7 @@ async fn try_get_u64_property(
         })
 }
 
+/// Reads a D-Bus `u32` property value.
 async fn try_get_u32_property(
     proxy: &Proxy<'_>,
     property_name: &str,
@@ -736,6 +757,9 @@ async fn try_get_u32_property(
         })
 }
 
+/// Converts systemd microsecond timestamps to RFC3339 UTC strings.
+///
+/// Zero timestamps are treated as unknown and returned as `None`.
 fn format_systemd_timestamp_usec(timestamp_usec: u64) -> Option<String> {
     if timestamp_usec == 0 {
         return None;
@@ -753,6 +777,7 @@ enum GrepMatcher {
     Regex(Regex),
 }
 
+/// Builds substring or regex matcher from optional grep expression.
 fn build_grep_matcher(grep: Option<&str>) -> Result<Option<GrepMatcher>, AppError> {
     let Some(grep) = grep else {
         return Ok(None);
@@ -773,6 +798,7 @@ fn build_grep_matcher(grep: Option<&str>) -> Result<Option<GrepMatcher>, AppErro
     Ok(Some(GrepMatcher::Substring(trimmed.to_string())))
 }
 
+/// Evaluates whether a message matches the optional grep matcher.
 fn matches_grep(matcher: &Option<GrepMatcher>, message: &str) -> bool {
     let Some(matcher) = matcher else {
         return true;
@@ -784,6 +810,9 @@ fn matches_grep(matcher: &Option<GrepMatcher>, message: &str) -> bool {
     }
 }
 
+/// Sanitizes log message content for safe structured output.
+///
+/// Trims whitespace and replaces disallowed control characters with spaces.
 fn sanitize_log_message(message: Option<String>) -> Option<String> {
     message.and_then(|value| {
         let trimmed = value.trim();
@@ -815,6 +844,9 @@ fn sanitize_log_message(message: Option<String>) -> Option<String> {
     })
 }
 
+/// Reads journald entries according to time, unit, priority, and grep filters.
+///
+/// Applies ordering and limit constraints and returns both entries and scan count.
 fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
     let mut reader = journal::OpenOptions::default()
         .open()
@@ -971,6 +1003,9 @@ fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
     })
 }
 
+/// Reads and decodes a single journald field from the current reader cursor.
+///
+/// Uses lossy UTF-8 decoding so invalid sequences do not drop field availability.
 fn read_journal_field(
     reader: &mut systemd::Journal,
     field: &str,
