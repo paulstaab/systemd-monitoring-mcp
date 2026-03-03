@@ -9,6 +9,11 @@ use axum_extra::headers::{authorization::Bearer, Authorization, Header};
 
 use crate::{errors::AppError, AppState};
 
+/// Auth middleware that enforces Bearer token access to protected MCP routes.
+///
+/// Rejects missing or malformed authorization headers with stable auth errors.
+/// This function does not log token values and forwards the request only after
+/// exact token match against configured app state.
 pub async fn require_bearer_token(
     State(state): State<AppState>,
     request: Request,
@@ -34,6 +39,9 @@ pub async fn require_bearer_token(
     Ok(next.run(request).await)
 }
 
+/// Decodes a raw HTTP `Authorization` header into a Bearer authorization value.
+///
+/// Returns `None` when the scheme or structure is not Bearer-compatible.
 fn decode_bearer_authorization(value: &HeaderValue) -> Option<Authorization<Bearer>> {
     let mut header_values = std::iter::once(value);
     Authorization::<Bearer>::decode(&mut header_values).ok()

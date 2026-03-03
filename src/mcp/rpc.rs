@@ -8,10 +8,15 @@ use rust_mcp_sdk::schema::{
 };
 use serde_json::{json, Value};
 
+/// Returns `true` when a JSON-RPC response payload contains an `error` object.
 pub fn is_json_rpc_error(value: &Value) -> bool {
     value.get("error").is_some()
 }
 
+/// Maps internal `AppError` values to stable JSON-RPC error responses.
+///
+/// Validation failures map to `-32602`, auth failures to `-32001`, and internal
+/// failures to opaque `-32603` responses.
 pub fn app_error_to_json_rpc(id: Option<Value>, err: AppError) -> Value {
     match err {
         AppError::BadRequest { code, message } => json_rpc_error_with_data(
@@ -42,10 +47,12 @@ pub fn app_error_to_json_rpc(id: Option<Value>, err: AppError) -> Value {
     }
 }
 
+/// Creates a JSON-RPC error response without additional `data` payload.
 pub fn json_rpc_error(id: Option<Value>, code: i32, message: &str) -> Value {
     json_rpc_error_with_data(id, code, message, None)
 }
 
+/// Creates a JSON-RPC error response with optional structured `data` details.
 pub fn json_rpc_error_with_data(
     id: Option<Value>,
     code: i32,
@@ -63,6 +70,9 @@ pub fn json_rpc_error_with_data(
     serde_json::to_value(response).expect("jsonrpc error response serialization")
 }
 
+/// Creates a JSON-RPC result response preserving request id semantics.
+///
+/// If id conversion fails, this falls back to a raw JSON-RPC result envelope.
 pub fn json_rpc_result(id: Option<Value>, result: Value) -> Value {
     if let Some(request_id) = id.as_ref().and_then(value_to_request_id) {
         let extra = result.as_object().cloned();
@@ -77,6 +87,7 @@ pub fn json_rpc_result(id: Option<Value>, result: Value) -> Value {
     })
 }
 
+/// Converts a JSON value into MCP `RequestId` when possible.
 pub fn value_to_request_id(value: &Value) -> Option<RequestId> {
     if let Some(string_id) = value.as_str() {
         return Some(RequestId::String(string_id.to_string()));
@@ -85,6 +96,7 @@ pub fn value_to_request_id(value: &Value) -> Option<RequestId> {
     value.as_i64().map(RequestId::Integer)
 }
 
+/// Converts MCP `RequestId` back into a JSON value for response shaping.
 pub fn request_id_to_value(id: RequestId) -> Value {
     match id {
         RequestId::String(value) => Value::String(value),

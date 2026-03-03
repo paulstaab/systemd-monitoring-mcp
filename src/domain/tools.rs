@@ -188,6 +188,9 @@ struct TimerSummary {
     failed_or_problem_timers: Vec<ProblemTimer>,
 }
 
+/// Builds `list_services` summary payload for triage mode.
+///
+/// Includes state counts, a capped failed-unit list, and an optional degraded hint.
 fn build_service_summary(services: &[crate::systemd_client::UnitStatus]) -> ServiceSummary {
     let mut counts_by_active_state = BTreeMap::new();
     for service in services {
@@ -226,6 +229,9 @@ fn build_service_summary(services: &[crate::systemd_client::UnitStatus]) -> Serv
     }
 }
 
+/// Builds `list_logs` summary payload for triage mode.
+///
+/// Produces top-unit and priority counts, frequent messages, and error hotspots.
 fn build_log_summary(entries: &[crate::systemd_client::JournalLogEntry]) -> LogSummary {
     let mut counts_by_unit_raw: HashMap<String, usize> = HashMap::new();
     let mut counts_by_priority_raw: HashMap<String, usize> = HashMap::new();
@@ -302,6 +308,7 @@ fn build_log_summary(entries: &[crate::systemd_client::JournalLogEntry]) -> LogS
     }
 }
 
+/// Builds the advertised MCP tool catalog returned by `tools/list`.
 pub fn build_tools_list() -> Vec<Tool> {
     vec![
         ListServicesTool::tool(),
@@ -644,6 +651,10 @@ fn build_timer_summary(items: &[TimerItem]) -> TimerSummary {
     }
 }
 
+/// Validates and normalizes `list_logs` query parameters into an execution query.
+///
+/// Enforces required time range, UTC semantics, time-window bounds, limit caps,
+/// unit validation, and supported sort order.
 pub fn build_log_query(params: LogsQueryParams) -> Result<LogQuery, AppError> {
     let start_utc = parse_utc(&params.start_utc)?;
     let end_utc = parse_utc(&params.end_utc)?;
@@ -724,6 +735,10 @@ pub fn build_log_query(params: LogsQueryParams) -> Result<LogQuery, AppError> {
     })
 }
 
+/// Handles MCP `tools/call` requests and dispatches to supported tool handlers.
+///
+/// Returns JSON-RPC `-32602` for malformed params and `-32601` with structured
+/// tool details for unknown tool names.
 pub async fn handle_tools_call(
     state: &AppState,
     id: Option<Value>,

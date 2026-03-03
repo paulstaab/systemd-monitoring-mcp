@@ -4,6 +4,9 @@ use axum::{extract::Request, middleware::Next, response::Response};
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
+/// Initializes tracing subscriber configuration for the server process.
+///
+/// Uses `RUST_LOG` when provided, defaulting to `info` level otherwise.
 pub fn init_logging() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     fmt()
@@ -13,6 +16,9 @@ pub fn init_logging() {
         .init();
 }
 
+/// Middleware that emits request summary logs and auth-failure warnings.
+///
+/// The log payload intentionally excludes request bodies and sensitive headers.
 pub async fn request_logging_middleware(request: Request, next: Next) -> Response {
     let method = request.method().clone();
     let path = request.uri().path().to_string();

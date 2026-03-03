@@ -41,18 +41,22 @@ pub struct ErrorResponse {
 }
 
 impl AppError {
+    /// Creates a stable bad-request error for validation failures.
     pub fn bad_request(code: &'static str, message: &'static str) -> Self {
         Self::BadRequest { code, message }
     }
 
+    /// Creates an unauthorized error used by auth and access checks.
     pub fn unauthorized(code: &'static str, message: &'static str) -> Self {
         Self::Unauthorized { code, message }
     }
 
+    /// Creates a forbidden error for authenticated-but-disallowed operations.
     pub fn forbidden(code: &'static str, message: &'static str) -> Self {
         Self::Forbidden { code, message }
     }
 
+    /// Creates an internal error preserving operator diagnostics server-side.
     pub fn internal(message: impl Into<String>) -> Self {
         Self::Internal {
             code: "internal_error",
@@ -60,12 +64,17 @@ impl AppError {
         }
     }
 
+    /// Creates a not-implemented error for explicitly unsupported behavior.
     pub fn not_implemented(code: &'static str, message: &'static str) -> Self {
         Self::NotImplemented { code, message }
     }
 }
 
 impl IntoResponse for AppError {
+    /// Maps app errors into the standardized HTTP error response shape.
+    ///
+    /// Client responses remain opaque for internal failures, while detailed
+    /// diagnostics are logged with an internal error identifier.
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
             Self::BadRequest { code, message } => {
