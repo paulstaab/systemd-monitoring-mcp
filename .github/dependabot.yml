@@ -10,7 +10,11 @@ updates:
    directory: "/"
    schedule:
      interval: weekly
+   assignees:
+     - "paulstaab"
  - package-ecosystem: "cargo"
    directory: "/"
    schedule:
      interval: weekly
+   assignees:
+     - "paulstaab"
