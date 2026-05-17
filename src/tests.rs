@@ -16,6 +16,8 @@ use super::*;
 
 struct MockProvider;
 
+struct DegradedProvider;
+
 fn system_services() -> Vec<UnitStatus> {
     vec![
         UnitStatus {
@@ -174,6 +176,15 @@ fn user_logs() -> Vec<JournalLogEntry> {
 
 #[async_trait::async_trait]
 impl UnitProvider for MockProvider {
+    async fn system_state(&self, scope: UnitScope) -> Result<String, crate::errors::AppError> {
+        match scope {
+            UnitScope::System | UnitScope::User => Ok("running".to_string()),
+            UnitScope::Both => Err(crate::errors::AppError::internal(
+                "system_state requires a concrete scope",
+            )),
+        }
+    }
+
     async fn list_service_units(
         &self,
         scope: UnitScope,
@@ -250,8 +261,48 @@ impl UnitProvider for MockProvider {
     }
 }
 
+#[async_trait::async_trait]
+impl UnitProvider for DegradedProvider {
+    async fn system_state(&self, scope: UnitScope) -> Result<String, crate::errors::AppError> {
+        match scope {
+            UnitScope::System | UnitScope::User => Ok("degraded".to_string()),
+            UnitScope::Both => Err(crate::errors::AppError::internal(
+                "system_state requires a concrete scope",
+            )),
+        }
+    }
+
+    async fn list_service_units(
+        &self,
+        _scope: UnitScope,
+    ) -> Result<Vec<UnitStatus>, crate::errors::AppError> {
+        Ok(Vec::new())
+    }
+
+    async fn list_journal_logs(
+        &self,
+        _query: &LogQuery,
+    ) -> Result<LogQueryResult, crate::errors::AppError> {
+        Ok(LogQueryResult {
+            entries: Vec::new(),
+            total_scanned: Some(0),
+        })
+    }
+
+    async fn list_timer_units(
+        &self,
+        _scope: UnitScope,
+    ) -> Result<Vec<TimerStatus>, crate::errors::AppError> {
+        Ok(Vec::new())
+    }
+}
+
 fn app() -> Router {
-    let state = AppState::new("token-1234567890ab".to_string(), Arc::new(MockProvider));
+    app_with_provider(Arc::new(MockProvider))
+}
+
+fn app_with_provider(unit_provider: Arc<dyn UnitProvider>) -> Router {
+    let state = AppState::new("token-1234567890ab".to_string(), unit_provider);
     build_app(state)
 }
 
@@ -276,6 +327,109 @@ async fn health_is_public() {
         .expect("collect body")
         .to_bytes();
     assert_eq!(body, "{\"status\":\"ok\"}");
+}
+
+#[tokio::test]
+async fn systemd_system_status_requires_token() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/systemd/system/status")
+                .method("GET")
+                .body(Body::empty())
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+    assert_eq!(body_json["code"], "missing_token");
+}
+
+#[tokio::test]
+async fn systemd_system_status_running_is_successful_with_token() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/systemd/system/status")
+                .method("GET")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                .body(Body::empty())
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+    assert_eq!(body_json["scope"], "system");
+    assert_eq!(body_json["status"], "running");
+}
+
+#[tokio::test]
+async fn systemd_user_status_running_is_successful_with_token() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/systemd/user/status")
+                .method("GET")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                .body(Body::empty())
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+    assert_eq!(body_json["scope"], "user");
+    assert_eq!(body_json["status"], "running");
+}
+
+#[tokio::test]
+async fn systemd_status_degraded_returns_service_unavailable() {
+    let response = app_with_provider(Arc::new(DegradedProvider))
+        .oneshot(
+            Request::builder()
+                .uri("/systemd/system/status")
+                .method("GET")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                .body(Body::empty())
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+    assert_eq!(body_json["code"], "systemd_not_running");
+    assert_eq!(body_json["details"]["scope"], "system");
+    assert_eq!(body_json["details"]["status"], "degraded");
 }
 
 #[tokio::test]

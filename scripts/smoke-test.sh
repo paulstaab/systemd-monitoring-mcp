@@ -40,6 +40,28 @@ assert_contains() {
   fi
 }
 
+assert_systemd_status_response() {
+  local scope="$1"
+  local status_code="$2"
+  local body="$3"
+  local path="/systemd/${scope}/status"
+
+  case "$status_code" in
+    200)
+      assert_contains "$body" "\"scope\":\"${scope}\"" "${path} body did not contain ${scope} scope"
+      assert_contains "$body" '"status":"running"' "${path} body did not report running"
+      ;;
+    503)
+      assert_contains "$body" '"code":"systemd_not_running"' "${path} 503 body did not contain systemd_not_running code"
+      assert_contains "$body" "\"scope\":\"${scope}\"" "${path} 503 body did not contain ${scope} scope"
+      assert_contains "$body" '"status":"' "${path} 503 body did not contain observed status"
+      ;;
+    *)
+      fail "${path} returned status ${status_code}, expected 200 or 503"
+      ;;
+  esac
+}
+
 wait_for_health() {
   local attempts=0
   local max_attempts=60
@@ -105,6 +127,29 @@ check_systemd_available() {
   echo "[smoke] busctl/dbus-send not found; proceeding after socket-level availability check"
 }
 
+user_systemd_available() {
+  if command -v busctl >/dev/null 2>&1; then
+    busctl --user call \
+      org.freedesktop.systemd1 \
+      /org/freedesktop/systemd1 \
+      org.freedesktop.DBus.Peer \
+      Ping >/dev/null 2>&1
+    return $?
+  fi
+
+  if command -v dbus-send >/dev/null 2>&1; then
+    dbus-send --session \
+      --dest=org.freedesktop.systemd1 \
+      --type=method_call \
+      --print-reply \
+      /org/freedesktop/systemd1 \
+      org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1
+    return $?
+  fi
+
+  return 1
+}
+
 check_binary_available
 check_systemd_available
 
@@ -119,6 +164,20 @@ health_body="$(curl -sS "${BASE_URL}/health")"
 health_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/health")"
 [[ "$health_status" == "200" ]] || fail "/health returned status ${health_status}, expected 200"
 assert_contains "$health_body" '"status":"ok"' "/health body did not contain expected status"
+
+echo "[smoke] checking GET /systemd/system/status"
+systemd_system_status_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/systemd/system/status")"
+systemd_system_status_code="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/systemd/system/status")"
+assert_systemd_status_response "system" "$systemd_system_status_code" "$systemd_system_status_body"
+
+if user_systemd_available; then
+  echo "[smoke] checking GET /systemd/user/status"
+  systemd_user_status_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/systemd/user/status")"
+  systemd_user_status_code="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/systemd/user/status")"
+  assert_systemd_status_response "user" "$systemd_user_status_code" "$systemd_user_status_body"
+else
+  echo "[smoke] skipping GET /systemd/user/status because user systemd is not reachable"
+fi
 
 echo "[smoke] checking GET /.well-known/mcp"
 discovery_body="$(curl -sS "${BASE_URL}/.well-known/mcp")"

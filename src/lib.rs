@@ -35,11 +35,20 @@ impl AppState {
 
 /// Builds the HTTP router with public and authenticated MCP routes.
 ///
-/// The `/mcp` route is protected by bearer auth middleware; health and discovery
-/// routes remain public.
+/// The `/mcp` and systemd status routes are protected by bearer auth
+/// middleware. Health and discovery routes remain public because they expose
+/// only basic liveness and package metadata.
 pub fn build_app(state: AppState) -> Router {
     let protected = Router::new()
         .route("/mcp", post(http::handlers::mcp_endpoint))
+        .route(
+            "/systemd/system/status",
+            get(http::handlers::systemd_system_status),
+        )
+        .route(
+            "/systemd/user/status",
+            get(http::handlers::systemd_user_status),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_bearer_token,
