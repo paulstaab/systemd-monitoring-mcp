@@ -45,7 +45,11 @@ pub struct LogsQueryParams {
 
 #[macros::mcp_tool(
     name = "list_services",
-    description = "List systemd service units and current state"
+    description = "List systemd service units and current state. \
+Optional filters should be omitted when unset. scope accepts system, user, \
+or both and defaults to system. state accepts active, inactive, failed, \
+activating, deactivating, or reloading. limit accepts 1-1000 and defaults \
+to 200."
 )]
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct ListServicesTool {
@@ -82,7 +86,11 @@ pub struct ListLogsTool {
 
 #[macros::mcp_tool(
     name = "list_timers",
-    description = "List systemd timer units and scheduling/trigger state"
+    description = "List systemd timer units and scheduling/trigger state. \
+Optional filters should be omitted when unset. scope accepts system, user, \
+or both and defaults to system. state is a non-empty active-state filter. \
+sort accepts next, last, name, or state and defaults to name; order accepts \
+asc or desc and defaults to asc. limit accepts 1-1000 and defaults to 200."
 )]
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct ListTimersTool {
@@ -99,9 +107,8 @@ pub struct ListTimersTool {
 
 /// Builds the advertised MCP tool catalog returned by `tools/list`.
 ///
-/// The list_logs description intentionally carries strict optional-filter
-/// guidance so discovery clients learn to omit unset filters instead of sending
-/// wildcard or empty-string sentinel values that the API contract rejects.
+/// Tool descriptions intentionally carry strict filter and enum guidance so
+/// discovery clients can form valid requests before calling `tools/call`.
 pub fn build_tools_list() -> Vec<Tool> {
     vec![
         ListServicesTool::tool(),

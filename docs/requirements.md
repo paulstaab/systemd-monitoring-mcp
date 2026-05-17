@@ -58,6 +58,8 @@ Startup behavior:
 - The server must implement `tools/list`.
 - The server must implement `tools/call`.
 - `tools/list` must advertise strict input schemas and stable output schemas for each tool.
+- `tools/list` must include `list_services` usage guidance for supported `scope`, `state`, and `limit` values.
+- `tools/list` must include `list_timers` usage guidance for supported `scope`, `state`, `sort`, `order`, and `limit` values.
 - `tools/list` must include `list_logs` usage guidance that optional `priority` and `unit` filters are omitted when unset, `priority` is a journald severity threshold rather than a regex field, and `grep` is used for message text or regex-lite matching.
 - `tools/call` success responses must place canonical machine-readable JSON results in `structuredContent`.
 - `tools/call` may include optional human-readable `content`, but `structuredContent` is required for successful tool calls.

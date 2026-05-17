@@ -564,6 +564,18 @@ async fn mcp_tools_list_returns_required_tools() {
     assert_eq!(body_json["result"]["tools"][0]["name"], "list_services");
     assert_eq!(body_json["result"]["tools"][1]["name"], "list_timers");
     assert_eq!(body_json["result"]["tools"][2]["name"], "list_logs");
+    let list_services_description = body_json["result"]["tools"][0]["description"]
+        .as_str()
+        .expect("list_services description");
+    assert!(list_services_description.contains("scope accepts system, user, or both"));
+    assert!(list_services_description.contains("state accepts active"));
+    assert!(list_services_description.contains("limit accepts 1-1000"));
+    let list_timers_description = body_json["result"]["tools"][1]["description"]
+        .as_str()
+        .expect("list_timers description");
+    assert!(list_timers_description.contains("state is a non-empty active-state filter"));
+    assert!(list_timers_description.contains("sort accepts next, last, name, or state"));
+    assert!(list_timers_description.contains("order accepts asc or desc"));
     let list_logs_description = body_json["result"]["tools"][2]["description"]
         .as_str()
         .expect("list_logs description");

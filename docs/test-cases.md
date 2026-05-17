@@ -31,6 +31,8 @@
 
 - `tools/list` returns `200` JSON-RPC result containing at least `list_services`, `list_timers`, and `list_logs`.
 - `tools/list` entries include strict input schema and stable output schema metadata.
+- `tools/list` `list_services` description explains supported `scope`, `state`, and `limit` values.
+- `tools/list` `list_timers` description explains supported `scope`, non-empty `state`, `sort`, `order`, and `limit` values.
 - `tools/list` `list_logs` description explains that unset optional `priority` and `unit` filters must be omitted, `priority` is a severity threshold rather than regex, and `grep` is for message matching.
 - Successful `tools/call` responses include canonical machine-readable JSON in `structuredContent`.
 - `tools/call` with unknown tool name returns JSON-RPC error `-32601` (or project-defined equivalent for tool-not-found) with stable error data.
