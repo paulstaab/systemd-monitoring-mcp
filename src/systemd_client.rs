@@ -187,6 +187,13 @@ pub async fn ensure_systemd_available() -> Result<(), SystemdAvailabilityError> 
 
 #[async_trait]
 pub trait UnitProvider: Send + Sync {
+    /// Reads the current systemd manager state for one concrete scope.
+    ///
+    /// Implementations must return the manager `SystemState` value, such as
+    /// `running` or `degraded`, for `system` or `user` scopes. `both` is not a
+    /// valid status-check scope because the uptime endpoints report each manager
+    /// independently.
+    async fn system_state(&self, scope: UnitScope) -> Result<String, AppError>;
     /// Lists systemd `*.service` units for the requested manager scope.
     async fn list_service_units(&self, scope: UnitScope) -> Result<Vec<UnitStatus>, AppError>;
     /// Lists systemd timer units with scheduling/trigger metadata when available.
@@ -405,6 +412,39 @@ where
 
 #[async_trait]
 impl UnitProvider for DbusSystemdClient {
+    /// Reads the systemd manager `SystemState` property for status endpoints.
+    ///
+    /// The HTTP uptime checks rely on this exact value to distinguish `running`
+    /// from degraded or transitional states. Only concrete `system` and `user`
+    /// scopes are valid here; callers should expose separate checks rather than
+    /// mixing both managers into one ambiguous status.
+    async fn system_state(&self, scope: UnitScope) -> Result<String, AppError> {
+        let connection = dbus_connection_for_scope(scope).await?;
+        let proxy = Proxy::new(
+            &connection,
+            "org.freedesktop.systemd1",
+            "/org/freedesktop/systemd1",
+            "org.freedesktop.systemd1.Manager",
+        )
+        .await
+        .map_err(|err| {
+            AppError::internal(format!(
+                "failed to create {} systemd dbus proxy: {err}",
+                scope.as_str()
+            ))
+        })?;
+
+        proxy
+            .get_property::<String>("SystemState")
+            .await
+            .map_err(|err| {
+                AppError::internal(format!(
+                    "failed to read {} systemd SystemState property: {err}",
+                    scope.as_str()
+                ))
+            })
+    }
+
     /// Lists and enriches service units from systemd over D-Bus.
     ///
     /// Detail enrichment is best-effort per unit; enrichment failures are logged

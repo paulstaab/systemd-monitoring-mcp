@@ -105,6 +105,29 @@ check_systemd_available() {
   echo "[smoke] busctl/dbus-send not found; proceeding after socket-level availability check"
 }
 
+user_systemd_available() {
+  if command -v busctl >/dev/null 2>&1; then
+    busctl --user call \
+      org.freedesktop.systemd1 \
+      /org/freedesktop/systemd1 \
+      org.freedesktop.DBus.Peer \
+      Ping >/dev/null 2>&1
+    return $?
+  fi
+
+  if command -v dbus-send >/dev/null 2>&1; then
+    dbus-send --session \
+      --dest=org.freedesktop.systemd1 \
+      --type=method_call \
+      --print-reply \
+      /org/freedesktop/systemd1 \
+      org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1
+    return $?
+  fi
+
+  return 1
+}
+
 check_binary_available
 check_systemd_available
 
@@ -119,6 +142,24 @@ health_body="$(curl -sS "${BASE_URL}/health")"
 health_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/health")"
 [[ "$health_status" == "200" ]] || fail "/health returned status ${health_status}, expected 200"
 assert_contains "$health_body" '"status":"ok"' "/health body did not contain expected status"
+
+echo "[smoke] checking GET /systemd/system/status"
+systemd_system_status_body="$(curl -sS "${BASE_URL}/systemd/system/status")"
+systemd_system_status_code="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/systemd/system/status")"
+[[ "$systemd_system_status_code" == "200" ]] || fail "/systemd/system/status returned status ${systemd_system_status_code}, expected 200"
+assert_contains "$systemd_system_status_body" '"scope":"system"' "/systemd/system/status body did not contain system scope"
+assert_contains "$systemd_system_status_body" '"status":"running"' "/systemd/system/status body did not report running"
+
+if user_systemd_available; then
+  echo "[smoke] checking GET /systemd/user/status"
+  systemd_user_status_body="$(curl -sS "${BASE_URL}/systemd/user/status")"
+  systemd_user_status_code="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/systemd/user/status")"
+  [[ "$systemd_user_status_code" == "200" ]] || fail "/systemd/user/status returned status ${systemd_user_status_code}, expected 200"
+  assert_contains "$systemd_user_status_body" '"scope":"user"' "/systemd/user/status body did not contain user scope"
+  assert_contains "$systemd_user_status_body" '"status":"running"' "/systemd/user/status body did not report running"
+else
+  echo "[smoke] skipping GET /systemd/user/status because user systemd is not reachable"
+fi
 
 echo "[smoke] checking GET /.well-known/mcp"
 discovery_body="$(curl -sS "${BASE_URL}/.well-known/mcp")"
