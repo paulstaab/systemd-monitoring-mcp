@@ -3,9 +3,10 @@
 ## HTTP Transport and Security
 
 - `GET /health` returns `200` with `{ "status": "ok" }` and no sensitive fields.
-- `GET /systemd/system/status` returns `200` with `scope=system` and `status=running` when the system manager is running.
-- `GET /systemd/user/status` returns `200` with `scope=user` and `status=running` when the user manager is running.
-- Systemd status endpoints return `503` with structured HTTP error body when the manager status is `degraded`.
+- `GET /systemd/system/status` without authorization header returns `401` with `missing_token` code.
+- `GET /systemd/system/status` with valid bearer token returns `200` with `scope=system` and `status=running` when the system manager is running.
+- `GET /systemd/user/status` with valid bearer token returns `200` with `scope=user` and `status=running` when the user manager is running.
+- Systemd status endpoints with valid bearer token return `503` with structured HTTP error body when the manager status is `degraded`.
 - `POST /mcp` without authorization header returns `401` with `missing_token` code.
 - `POST /mcp` with non-bearer auth scheme returns `401` with `invalid_token` code.
 - `POST /mcp` with malformed authorization header value (header present but unparsable) returns `401` with `invalid_token` code.

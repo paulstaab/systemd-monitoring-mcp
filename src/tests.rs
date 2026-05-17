@@ -330,12 +330,37 @@ async fn health_is_public() {
 }
 
 #[tokio::test]
-async fn systemd_system_status_running_is_public_and_successful() {
+async fn systemd_system_status_requires_token() {
     let response = app()
         .oneshot(
             Request::builder()
                 .uri("/systemd/system/status")
                 .method("GET")
+                .body(Body::empty())
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+    assert_eq!(body_json["code"], "missing_token");
+}
+
+#[tokio::test]
+async fn systemd_system_status_running_is_successful_with_token() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/systemd/system/status")
+                .method("GET")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                 .body(Body::empty())
                 .expect("request build"),
         )
@@ -355,12 +380,13 @@ async fn systemd_system_status_running_is_public_and_successful() {
 }
 
 #[tokio::test]
-async fn systemd_user_status_running_is_public_and_successful() {
+async fn systemd_user_status_running_is_successful_with_token() {
     let response = app()
         .oneshot(
             Request::builder()
                 .uri("/systemd/user/status")
                 .method("GET")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                 .body(Body::empty())
                 .expect("request build"),
         )
@@ -386,6 +412,7 @@ async fn systemd_status_degraded_returns_service_unavailable() {
             Request::builder()
                 .uri("/systemd/system/status")
                 .method("GET")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                 .body(Body::empty())
                 .expect("request build"),
         )

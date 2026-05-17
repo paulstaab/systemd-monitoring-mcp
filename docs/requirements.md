@@ -7,7 +7,7 @@ Implement an MCP server for monitoring systemd units and journald logs over the 
 MVP scope is limited to:
 - Exposing a standards-compliant MCP JSON-RPC endpoint.
 - Providing monitoring capabilities via MCP tools and resources.
-- Providing public uptime-check endpoints for system and user systemd manager state.
+- Providing authenticated uptime-check endpoints for system and user systemd manager state.
 - Listing systemd `*.service` units and their current state.
 - Listing systemd `*.timer` units and their scheduling/trigger state.
 - Reading journald logs with optional filtering and limiting.
@@ -36,8 +36,8 @@ Startup behavior:
 - MCP requests must be accepted via HTTP `POST` on `/mcp`.
 - `POST /` must not act as an MCP alias.
 - `GET /health` may be exposed as an operational endpoint and must not expose sensitive information.
-- `GET /systemd/system/status` may be exposed as an operational endpoint for system manager checks.
-- `GET /systemd/user/status` may be exposed as an operational endpoint for user manager checks.
+- `GET /systemd/system/status` may be exposed as an authenticated operational endpoint for system manager checks.
+- `GET /systemd/user/status` may be exposed as an authenticated operational endpoint for user manager checks.
 - Systemd status endpoints must return `200 OK` with `scope` and `status` when the manager reports `running`.
 - Systemd status endpoints must return `503 Service Unavailable` with structured HTTP error shape when the manager reports any non-running state, including `degraded`.
 - Discovery metadata endpoint (`/.well-known/mcp`) may be exposed publicly and must advertise MCP endpoint path(s) only.
@@ -217,8 +217,8 @@ Startup behavior:
 Token validation:
 - Bearer token comparison must use a constant-time algorithm (HMAC-based) to prevent timing side-channel attacks.
 - `MCP_API_TOKEN` must be at least 16 characters; shorter values must be rejected at startup.
-- Requests to MCP protocol endpoint(s) without an `Authorization` header must be rejected.
-- Requests to MCP protocol endpoint(s) with a non-bearer scheme or invalid token must be rejected.
+- Requests to protected endpoint(s) without an `Authorization` header must be rejected.
+- Requests to protected endpoint(s) with a non-bearer scheme or invalid token must be rejected.
 
 Status codes:
 - `401 Unauthorized` for missing or invalid token.
