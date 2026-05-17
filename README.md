@@ -94,6 +94,14 @@ curl -s \
 
 ### MCP tools/call list_logs
 
+`list_logs` is strict about optional filters:
+
+- Omit `priority` when you do not want a priority threshold. Valid values are `0` through `7`, or aliases such as `err`, `warning`, `info`, and `debug`. `priority` is not a regex field, so values such as `.*` return JSON-RPC `-32602` with `invalid_priority`.
+- Omit `unit` when you do not want a unit filter. Do not send `unit: ""`; empty unit names return JSON-RPC `-32602` with `invalid_unit`.
+- Use `grep` for message text filtering. Plain strings are substring filters, and regex-lite patterns go there, for example `/timeout|failed/`.
+- Keep `start_utc` and `end_utc` as RFC3339 UTC strings ending in `Z`. Windows over 7 days require `allow_large_window: true`.
+- `exclude_units` can be omitted when empty. If present, each entry must be a valid unit name.
+
 ```bash
 curl -s \
 	-H "Content-Type: application/json" \
@@ -101,6 +109,23 @@ curl -s \
 	-d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_logs","arguments":{"scope":"both","priority":"err","unit":"sshd_service","exclude_units":["cron.service"],"grep":"/timeout|failed/","order":"desc","start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","limit":200}}}' \
 	http://127.0.0.1:8080/mcp
 ```
+
+For the input shape in the original error report, the equivalent valid request is:
+
+```json
+{
+  "allow_large_window": true,
+  "end_utc": "2026-05-17T23:59:59Z",
+  "grep": "error",
+  "limit": 20,
+  "order": "desc",
+  "scope": "system",
+  "start_utc": "2026-05-14T00:00:00Z",
+  "summary": true
+}
+```
+
+The omitted fields are intentional: `priority: ".*"` is invalid because priority accepts only journald severity thresholds, and `unit: ""` is invalid because a provided unit filter must be a non-empty unit identifier.
 
 ### MCP tools/call summary mode
 

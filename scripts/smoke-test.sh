@@ -157,6 +157,12 @@ tools_list_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
 assert_contains "$tools_list_body" '"list_services"' "tools/list did not include list_services"
 assert_contains "$tools_list_body" '"list_timers"' "tools/list did not include list_timers"
 assert_contains "$tools_list_body" '"list_logs"' "tools/list did not include list_logs"
+assert_contains "$tools_list_body" 'state accepts active' "tools/list list_services guidance did not mention valid states"
+assert_contains "$tools_list_body" 'sort accepts next, last, name, or state' "tools/list list_timers guidance did not mention valid sort values"
+assert_contains "$tools_list_body" 'order accepts asc or desc' "tools/list list_timers guidance did not mention valid order values"
+assert_contains "$tools_list_body" 'priority=\".*\"' "tools/list list_logs guidance did not mention invalid priority wildcard"
+assert_contains "$tools_list_body" 'unit=\"\"' "tools/list list_logs guidance did not mention invalid empty unit"
+assert_contains "$tools_list_body" 'Use grep' "tools/list list_logs guidance did not mention grep"
 
 echo "[smoke] checking POST /mcp tools/call list_timers"
 list_timers_body="$(curl -sS -X POST \

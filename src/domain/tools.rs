@@ -45,7 +45,11 @@ pub struct LogsQueryParams {
 
 #[macros::mcp_tool(
     name = "list_services",
-    description = "List systemd service units and current state"
+    description = "List systemd service units and current state. \
+Optional filters should be omitted when unset. scope accepts system, user, \
+or both and defaults to system. state accepts active, inactive, failed, \
+activating, deactivating, or reloading. limit accepts 1-1000 and defaults \
+to 200."
 )]
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct ListServicesTool {
@@ -58,7 +62,12 @@ pub struct ListServicesTool {
 
 #[macros::mcp_tool(
     name = "list_logs",
-    description = "List journald logs with filters and bounds"
+    description = "List journald logs with filters and bounds. \
+Optional filters must be omitted when unset: do not send priority=\".*\" \
+for all priorities, and do not send unit=\"\" for all units. \
+priority accepts journald severity thresholds 0-7 and aliases: emerg, alert, \
+crit, err, warning, notice, info, debug. Use grep for message substring or \
+regex-lite matching."
 )]
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct ListLogsTool {
@@ -77,7 +86,11 @@ pub struct ListLogsTool {
 
 #[macros::mcp_tool(
     name = "list_timers",
-    description = "List systemd timer units and scheduling/trigger state"
+    description = "List systemd timer units and scheduling/trigger state. \
+Optional filters should be omitted when unset. scope accepts system, user, \
+or both and defaults to system. state is a non-empty active-state filter. \
+sort accepts next, last, name, or state and defaults to name; order accepts \
+asc or desc and defaults to asc. limit accepts 1-1000 and defaults to 200."
 )]
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct ListTimersTool {
@@ -93,6 +106,9 @@ pub struct ListTimersTool {
 }
 
 /// Builds the advertised MCP tool catalog returned by `tools/list`.
+///
+/// Tool descriptions intentionally carry strict filter and enum guidance so
+/// discovery clients can form valid requests before calling `tools/call`.
 pub fn build_tools_list() -> Vec<Tool> {
     vec![
         ListServicesTool::tool(),
