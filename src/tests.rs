@@ -564,6 +564,13 @@ async fn mcp_tools_list_returns_required_tools() {
     assert_eq!(body_json["result"]["tools"][0]["name"], "list_services");
     assert_eq!(body_json["result"]["tools"][1]["name"], "list_timers");
     assert_eq!(body_json["result"]["tools"][2]["name"], "list_logs");
+    let list_logs_description = body_json["result"]["tools"][2]["description"]
+        .as_str()
+        .expect("list_logs description");
+    assert!(list_logs_description.contains("omit"));
+    assert!(list_logs_description.contains("priority=\".*\""));
+    assert!(list_logs_description.contains("unit=\"\""));
+    assert!(list_logs_description.contains("Use grep"));
 }
 
 #[tokio::test]
