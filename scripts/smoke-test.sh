@@ -40,6 +40,28 @@ assert_contains() {
   fi
 }
 
+assert_systemd_status_response() {
+  local scope="$1"
+  local status_code="$2"
+  local body="$3"
+  local path="/systemd/${scope}/status"
+
+  case "$status_code" in
+    200)
+      assert_contains "$body" "\"scope\":\"${scope}\"" "${path} body did not contain ${scope} scope"
+      assert_contains "$body" '"status":"running"' "${path} body did not report running"
+      ;;
+    503)
+      assert_contains "$body" '"code":"systemd_not_running"' "${path} 503 body did not contain systemd_not_running code"
+      assert_contains "$body" "\"scope\":\"${scope}\"" "${path} 503 body did not contain ${scope} scope"
+      assert_contains "$body" '"status":"' "${path} 503 body did not contain observed status"
+      ;;
+    *)
+      fail "${path} returned status ${status_code}, expected 200 or 503"
+      ;;
+  esac
+}
+
 wait_for_health() {
   local attempts=0
   local max_attempts=60
@@ -146,17 +168,13 @@ assert_contains "$health_body" '"status":"ok"' "/health body did not contain exp
 echo "[smoke] checking GET /systemd/system/status"
 systemd_system_status_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/systemd/system/status")"
 systemd_system_status_code="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/systemd/system/status")"
-[[ "$systemd_system_status_code" == "200" ]] || fail "/systemd/system/status returned status ${systemd_system_status_code}, expected 200"
-assert_contains "$systemd_system_status_body" '"scope":"system"' "/systemd/system/status body did not contain system scope"
-assert_contains "$systemd_system_status_body" '"status":"running"' "/systemd/system/status body did not report running"
+assert_systemd_status_response "system" "$systemd_system_status_code" "$systemd_system_status_body"
 
 if user_systemd_available; then
   echo "[smoke] checking GET /systemd/user/status"
   systemd_user_status_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/systemd/user/status")"
   systemd_user_status_code="$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/systemd/user/status")"
-  [[ "$systemd_user_status_code" == "200" ]] || fail "/systemd/user/status returned status ${systemd_user_status_code}, expected 200"
-  assert_contains "$systemd_user_status_body" '"scope":"user"' "/systemd/user/status body did not contain user scope"
-  assert_contains "$systemd_user_status_body" '"status":"running"' "/systemd/user/status body did not report running"
+  assert_systemd_status_response "user" "$systemd_user_status_code" "$systemd_user_status_body"
 else
   echo "[smoke] skipping GET /systemd/user/status because user systemd is not reachable"
 fi

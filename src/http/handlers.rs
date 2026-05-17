@@ -12,6 +12,7 @@ use axum::{
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::errors::ErrorResponse;
 use crate::mcp::rpc::{json_rpc_invalid_request, json_rpc_parse_error};
 use crate::mcp::server::handle_json_rpc_value;
 use crate::systemd_client::UnitScope;
@@ -95,14 +96,14 @@ async fn systemd_status(state: &AppState, scope: UnitScope) -> Response {
 
     (
         StatusCode::SERVICE_UNAVAILABLE,
-        Json(json!({
-            "code": "systemd_not_running",
-            "message": "systemd manager is not running",
-            "details": {
+        Json(ErrorResponse {
+            code: "systemd_not_running".to_string(),
+            message: "systemd manager is not running".to_string(),
+            details: json!({
                 "scope": scope_name,
                 "status": status,
-            },
-        })),
+            }),
+        }),
     )
         .into_response()
 }
