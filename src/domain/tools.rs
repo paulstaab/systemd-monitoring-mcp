@@ -19,8 +19,6 @@ use crate::AppState;
 pub use logs::build_log_query;
 pub use timers::{parse_timers_query_params, sort_timer_items, TimerItem};
 
-const LIST_LOGS_DISCOVERY_DESCRIPTION: &str = "List journald logs with filters and bounds. Optional filters must be omitted when unset: do not send priority=\".*\" for all priorities, and do not send unit=\"\" for all units. priority accepts only journald severity thresholds 0-7 or aliases such as err, warning, info, and debug. Use grep for message substring or regex-lite matching.";
-
 #[derive(Debug, Deserialize)]
 pub struct ServicesQueryParams {
     pub scope: Option<String>,
@@ -60,7 +58,12 @@ pub struct ListServicesTool {
 
 #[macros::mcp_tool(
     name = "list_logs",
-    description = "List journald logs with filters and bounds"
+    description = "List journald logs with filters and bounds. \
+Optional filters must be omitted when unset: do not send priority=\".*\" \
+for all priorities, and do not send unit=\"\" for all units. \
+priority accepts journald severity thresholds 0-7 and aliases: emerg, alert, \
+crit, err, warning, notice, info, debug. Use grep for message substring or \
+regex-lite matching."
 )]
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct ListLogsTool {
@@ -100,10 +103,11 @@ pub struct ListTimersTool {
 /// guidance so discovery clients learn to omit unset filters instead of sending
 /// wildcard or empty-string sentinel values that the API contract rejects.
 pub fn build_tools_list() -> Vec<Tool> {
-    let mut list_logs = ListLogsTool::tool();
-    list_logs.description = Some(LIST_LOGS_DISCOVERY_DESCRIPTION.to_string());
-
-    vec![ListServicesTool::tool(), ListTimersTool::tool(), list_logs]
+    vec![
+        ListServicesTool::tool(),
+        ListTimersTool::tool(),
+        ListLogsTool::tool(),
+    ]
 }
 
 /// Handles MCP `tools/call` requests and dispatches to supported tool handlers.
