@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
-use crate::domain::responses::{generated_at_utc_string, tool_success_response};
+use crate::domain::responses::{generated_at_utc_string, paginate_rows, tool_success_response};
 use crate::domain::utils::{
     normalize_name_contains, normalize_scope, normalize_timer_state, normalize_timers_limit,
     normalize_timers_order, normalize_timers_sort,
@@ -42,6 +42,7 @@ struct NormalizedTimersQuery {
 #[derive(Debug, Serialize, Clone)]
 pub struct TimerItem {
     pub unit: String,
+    pub scope: String,
     pub active_state: String,
     pub sub_state: String,
     pub next_run_utc: Option<String>,
@@ -250,6 +251,7 @@ fn build_timer_item(
 
     TimerItem {
         unit: timer.unit,
+        scope: timer.scope,
         active_state: timer.active_state,
         sub_state: timer.sub_state,
         next_run_utc: timer.next_run_utc,
@@ -439,6 +441,7 @@ pub async fn handle_list_timers(
 
             if normalized.summary_enabled {
                 let summary = build_timer_summary(&timers);
+                let total_scanned = timers.len();
                 let generated_at_utc = generated_at_utc_string();
 
                 return tool_success_response(
@@ -446,31 +449,25 @@ pub async fn handle_list_timers(
                     "Returned timer triage summary".to_string(),
                     serde_json::Map::from_iter([
                         ("summary".to_string(), json!(summary)),
-                        ("total_scanned".to_string(), json!(timers.len())),
-                        ("returned".to_string(), json!(timers.len())),
+                        ("total_scanned".to_string(), json!(total_scanned)),
+                        ("returned".to_string(), json!(total_scanned)),
                         ("truncated".to_string(), json!(false)),
                         ("generated_at_utc".to_string(), json!(generated_at_utc)),
                     ]),
                 );
             }
 
-            let total_scanned = timers.len();
-            let timers = timers
-                .into_iter()
-                .take(normalized.limit)
-                .collect::<Vec<_>>();
-            let returned = timers.len();
-            let truncated = total_scanned > returned;
+            let page = paginate_rows(timers, normalized.limit);
             let generated_at_utc = generated_at_utc_string();
 
             tool_success_response(
                 id,
-                format!("Returned {returned} of {total_scanned} timers"),
+                format!("Returned {} of {} timers", page.returned, page.total),
                 serde_json::Map::from_iter([
-                    ("timers".to_string(), json!(timers)),
-                    ("total_scanned".to_string(), json!(total_scanned)),
-                    ("returned".to_string(), json!(returned)),
-                    ("truncated".to_string(), json!(truncated)),
+                    ("timers".to_string(), json!(page.rows)),
+                    ("total_scanned".to_string(), json!(page.total)),
+                    ("returned".to_string(), json!(page.returned)),
+                    ("truncated".to_string(), json!(page.truncated)),
                     ("generated_at_utc".to_string(), json!(generated_at_utc)),
                 ]),
             )

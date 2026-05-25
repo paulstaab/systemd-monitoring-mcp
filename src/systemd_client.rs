@@ -5,9 +5,10 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, SecondsFormat, Utc};
+use futures_util::future::join_all;
 use regex::Regex;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use systemd::{daemon, journal};
 use thiserror::Error;
 use tracing::warn;
@@ -18,6 +19,7 @@ use crate::errors::AppError;
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct UnitStatus {
     pub unit: String,
+    pub scope: String,
     pub description: String,
     pub load_state: String,
     pub active_state: String,
@@ -32,6 +34,7 @@ pub struct UnitStatus {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TimerStatus {
     pub unit: String,
+    pub scope: String,
     pub load_state: String,
     pub active_state: String,
     pub sub_state: String,
@@ -84,6 +87,7 @@ impl UnitScope {
 pub struct LogQueryResult {
     pub entries: Vec<JournalLogEntry>,
     pub total_scanned: Option<usize>,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -249,35 +253,52 @@ impl DbusSystemdClient {
             )
             .collect();
 
-        let mut units = map_and_sort_service_units(raw_units.clone());
+        let mut units = map_and_sort_service_units(raw_units.clone(), scope);
         let unit_paths: HashMap<String, OwnedObjectPath> = raw_units
             .into_iter()
             .filter(|unit| unit.name.ends_with(".service"))
             .map(|unit| (unit.name, unit.unit_path))
             .collect();
 
-        for unit in &mut units {
-            let Some(unit_path) = unit_paths.get(&unit.unit) else {
-                continue;
-            };
+        let enrichment_tasks = units
+            .iter()
+            .filter_map(|unit| {
+                let unit_path = unit_paths.get(&unit.unit)?.clone();
+                let unit_name = unit.unit.clone();
+                let connection = connection.clone();
+                Some(async move {
+                    let details = fetch_service_details(&connection, &unit_path).await;
+                    (unit_name, unit_path, details)
+                })
+            })
+            .collect::<Vec<_>>();
 
-            match fetch_service_details(&connection, unit_path).await {
+        let enrichment_results = join_all(enrichment_tasks).await;
+        let mut details_by_unit = HashMap::new();
+        for (unit_name, unit_path, details) in enrichment_results {
+            match details {
                 Ok(details) => {
-                    unit.unit_file_state = details.unit_file_state;
-                    unit.since_utc = details.since_utc;
-                    unit.main_pid = details.main_pid;
-                    unit.exec_main_status = details.exec_main_status;
-                    unit.result = details.result;
+                    details_by_unit.insert(unit_name, details);
                 }
                 Err(err) => {
                     warn!(
-                        unit = %unit.unit,
+                        unit = %unit_name,
                         unit_path = %unit_path.as_str(),
                         scope = %scope.as_str(),
                         error = %err,
                         "failed to enrich service details from systemd"
                     );
                 }
+            }
+        }
+
+        for unit in &mut units {
+            if let Some(details) = details_by_unit.remove(&unit.unit) {
+                unit.unit_file_state = details.unit_file_state;
+                unit.since_utc = details.since_utc;
+                unit.main_pid = details.main_pid;
+                unit.exec_main_status = details.exec_main_status;
+                unit.result = details.result;
             }
         }
 
@@ -319,7 +340,7 @@ impl DbusSystemdClient {
             )
             .collect();
 
-        let mut timers = map_and_sort_timer_units(raw_units.clone());
+        let mut timers = map_and_sort_timer_units(raw_units.clone(), scope);
 
         let unit_paths: HashMap<String, OwnedObjectPath> = raw_units
             .iter()
@@ -332,23 +353,39 @@ impl DbusSystemdClient {
             .map(|unit| (unit.unit_path.as_str().to_string(), unit.name))
             .collect();
 
-        for timer in &mut timers {
-            let Some(unit_path) = unit_paths.get(&timer.unit) else {
-                continue;
-            };
+        let enrichment_tasks = timers
+            .iter()
+            .filter_map(|timer| {
+                let unit_path = unit_paths.get(&timer.unit)?.clone();
+                let unit_name = timer.unit.clone();
+                let connection = connection.clone();
+                let path_to_name = path_to_name.clone();
+                Some(async move {
+                    let details = fetch_timer_details(&connection, &unit_path, &path_to_name).await;
+                    (unit_name, details)
+                })
+            })
+            .collect::<Vec<_>>();
 
-            let details = fetch_timer_details(&connection, unit_path, &path_to_name).await;
-            timer.unit_file_state = details.unit_file_state;
-            timer.next_run_utc = details.next_run_utc;
-            timer.last_run_utc = details.last_run_utc;
-            timer.trigger_unit = details.trigger_unit.or_else(|| {
-                timer
-                    .unit
-                    .strip_suffix(".timer")
-                    .map(|name| format!("{name}.service"))
-            });
-            timer.persistent = details.persistent;
-            timer.result = details.result;
+        let mut details_by_unit = HashMap::new();
+        for (unit_name, details) in join_all(enrichment_tasks).await {
+            details_by_unit.insert(unit_name, details);
+        }
+
+        for timer in &mut timers {
+            if let Some(details) = details_by_unit.remove(&timer.unit) {
+                timer.unit_file_state = details.unit_file_state;
+                timer.next_run_utc = details.next_run_utc;
+                timer.last_run_utc = details.last_run_utc;
+                timer.trigger_unit = details.trigger_unit.or_else(|| {
+                    timer
+                        .unit
+                        .strip_suffix(".timer")
+                        .map(|name| format!("{name}.service"))
+                });
+                timer.persistent = details.persistent;
+                timer.result = details.result;
+            }
         }
 
         Ok(timers)
@@ -359,7 +396,10 @@ impl DbusSystemdClient {
 ///
 /// This helper preserves partial-result semantics: if one scope fails and the
 /// other succeeds, the successful scope rows are returned. Only when both scope
-/// fetches fail does it return an internal error.
+/// fetches fail does it return an internal error. Rows are intentionally not
+/// deduplicated by unit name because system and user managers can expose
+/// same-name units with different runtime state; callers rely on each row's
+/// `scope` field to distinguish them.
 fn combine_scope_rows_by_key<T, F>(
     system_result: Result<Vec<T>, AppError>,
     user_result: Result<Vec<T>, AppError>,
@@ -403,9 +443,7 @@ where
         )));
     }
 
-    let mut seen = HashSet::new();
     system.append(&mut user);
-    system.retain(|row| seen.insert(key(row).to_string()));
     system.sort_by(|left, right| key(left).cmp(key(right)));
     Ok(system)
 }
@@ -544,13 +582,15 @@ async fn list_units_rows(
 
 /// Maps raw D-Bus rows into service DTOs and sorts deterministically by unit name.
 ///
-/// Non-service units are filtered out.
-fn map_and_sort_service_units(raw_units: Vec<RawUnit>) -> Vec<UnitStatus> {
+/// Non-service units are filtered out and every row is tagged with its source
+/// manager scope so `scope=both` responses can preserve duplicate unit names.
+fn map_and_sort_service_units(raw_units: Vec<RawUnit>, scope: UnitScope) -> Vec<UnitStatus> {
     let mut units: Vec<UnitStatus> = raw_units
         .into_iter()
         .filter(|unit| unit.name.ends_with(".service"))
         .map(|unit| UnitStatus {
             unit: unit.name,
+            scope: scope.as_str().to_string(),
             description: unit.description,
             load_state: unit.load_state,
             active_state: unit.active_state,
@@ -570,13 +610,15 @@ fn map_and_sort_service_units(raw_units: Vec<RawUnit>) -> Vec<UnitStatus> {
 /// Maps raw unit rows to timer DTOs and applies deterministic unit-name sorting.
 ///
 /// Only `*.timer` units are retained. Enrichment fields are initialized to `None`
-/// and filled later by D-Bus detail lookups.
-fn map_and_sort_timer_units(raw_units: Vec<RawUnit>) -> Vec<TimerStatus> {
+/// and filled later by D-Bus detail lookups. Every row carries its source manager
+/// scope so combined system/user output remains distinguishable.
+fn map_and_sort_timer_units(raw_units: Vec<RawUnit>, scope: UnitScope) -> Vec<TimerStatus> {
     let mut timers: Vec<TimerStatus> = raw_units
         .into_iter()
         .filter(|unit| unit.name.ends_with(".timer"))
         .map(|unit| TimerStatus {
             unit: unit.name,
+            scope: scope.as_str().to_string(),
             load_state: unit.load_state,
             active_state: unit.active_state,
             sub_state: unit.sub_state,
@@ -1085,7 +1127,7 @@ fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
     let mut total_scanned = 0usize;
 
     loop {
-        if entries.len() >= query.limit {
+        if entries.len() > query.limit {
             break;
         }
 
@@ -1184,9 +1226,13 @@ fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
         });
     }
 
+    let has_more = entries.len() > query.limit;
+    entries.truncate(query.limit);
+
     Ok(LogQueryResult {
         entries,
         total_scanned: Some(total_scanned),
+        has_more,
     })
 }
 
@@ -1232,45 +1278,55 @@ fn read_journal_field(
 mod tests {
     use super::{
         combine_scope_rows_by_key, map_and_sort_service_units, map_and_sort_timer_units,
-        JournalLogEntry, RawUnit, UnitStatus,
+        JournalLogEntry, RawUnit, UnitScope, UnitStatus,
     };
     use crate::errors::AppError;
     use zbus::zvariant::OwnedObjectPath;
 
     #[test]
     fn filters_non_service_and_sorts() {
-        let mapped = map_and_sort_service_units(vec![
-            RawUnit {
-                name: "z.service".to_string(),
-                description: "".to_string(),
-                load_state: "loaded".to_string(),
-                active_state: "active".to_string(),
-                sub_state: "running".to_string(),
-                unit_path: OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/z_2eservice")
+        let mapped = map_and_sort_service_units(
+            vec![
+                RawUnit {
+                    name: "z.service".to_string(),
+                    description: "".to_string(),
+                    load_state: "loaded".to_string(),
+                    active_state: "active".to_string(),
+                    sub_state: "running".to_string(),
+                    unit_path: OwnedObjectPath::try_from(
+                        "/org/freedesktop/systemd1/unit/z_2eservice",
+                    )
                     .expect("valid object path"),
-            },
-            RawUnit {
-                name: "a.socket".to_string(),
-                description: "Socket".to_string(),
-                load_state: "loaded".to_string(),
-                active_state: "active".to_string(),
-                sub_state: "running".to_string(),
-                unit_path: OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/a_2esocket")
+                },
+                RawUnit {
+                    name: "a.socket".to_string(),
+                    description: "Socket".to_string(),
+                    load_state: "loaded".to_string(),
+                    active_state: "active".to_string(),
+                    sub_state: "running".to_string(),
+                    unit_path: OwnedObjectPath::try_from(
+                        "/org/freedesktop/systemd1/unit/a_2esocket",
+                    )
                     .expect("valid object path"),
-            },
-            RawUnit {
-                name: "a.service".to_string(),
-                description: "Alpha".to_string(),
-                load_state: "loaded".to_string(),
-                active_state: "failed".to_string(),
-                sub_state: "failed".to_string(),
-                unit_path: OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/a_2eservice")
+                },
+                RawUnit {
+                    name: "a.service".to_string(),
+                    description: "Alpha".to_string(),
+                    load_state: "loaded".to_string(),
+                    active_state: "failed".to_string(),
+                    sub_state: "failed".to_string(),
+                    unit_path: OwnedObjectPath::try_from(
+                        "/org/freedesktop/systemd1/unit/a_2eservice",
+                    )
                     .expect("valid object path"),
-            },
-        ]);
+                },
+            ],
+            UnitScope::System,
+        );
 
         assert_eq!(mapped.len(), 2);
         assert_eq!(mapped[0].unit, "a.service");
+        assert_eq!(mapped[0].scope, "system");
         assert_eq!(mapped[0].description, "Alpha");
         assert_eq!(mapped[0].load_state, "loaded");
         assert_eq!(mapped[0].active_state, "failed");
@@ -1281,38 +1337,48 @@ mod tests {
 
     #[test]
     fn filters_non_timer_and_sorts() {
-        let mapped = map_and_sort_timer_units(vec![
-            RawUnit {
-                name: "z.timer".to_string(),
-                description: "".to_string(),
-                load_state: "loaded".to_string(),
-                active_state: "active".to_string(),
-                sub_state: "waiting".to_string(),
-                unit_path: OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/z_2etimer")
+        let mapped = map_and_sort_timer_units(
+            vec![
+                RawUnit {
+                    name: "z.timer".to_string(),
+                    description: "".to_string(),
+                    load_state: "loaded".to_string(),
+                    active_state: "active".to_string(),
+                    sub_state: "waiting".to_string(),
+                    unit_path: OwnedObjectPath::try_from(
+                        "/org/freedesktop/systemd1/unit/z_2etimer",
+                    )
                     .expect("valid object path"),
-            },
-            RawUnit {
-                name: "a.service".to_string(),
-                description: "Service".to_string(),
-                load_state: "loaded".to_string(),
-                active_state: "active".to_string(),
-                sub_state: "running".to_string(),
-                unit_path: OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/a_2eservice")
+                },
+                RawUnit {
+                    name: "a.service".to_string(),
+                    description: "Service".to_string(),
+                    load_state: "loaded".to_string(),
+                    active_state: "active".to_string(),
+                    sub_state: "running".to_string(),
+                    unit_path: OwnedObjectPath::try_from(
+                        "/org/freedesktop/systemd1/unit/a_2eservice",
+                    )
                     .expect("valid object path"),
-            },
-            RawUnit {
-                name: "a.timer".to_string(),
-                description: "Alpha timer".to_string(),
-                load_state: "loaded".to_string(),
-                active_state: "failed".to_string(),
-                sub_state: "failed".to_string(),
-                unit_path: OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/a_2etimer")
+                },
+                RawUnit {
+                    name: "a.timer".to_string(),
+                    description: "Alpha timer".to_string(),
+                    load_state: "loaded".to_string(),
+                    active_state: "failed".to_string(),
+                    sub_state: "failed".to_string(),
+                    unit_path: OwnedObjectPath::try_from(
+                        "/org/freedesktop/systemd1/unit/a_2etimer",
+                    )
                     .expect("valid object path"),
-            },
-        ]);
+                },
+            ],
+            UnitScope::System,
+        );
 
         assert_eq!(mapped.len(), 2);
         assert_eq!(mapped[0].unit, "a.timer");
+        assert_eq!(mapped[0].scope, "system");
         assert_eq!(mapped[1].unit, "z.timer");
     }
 
@@ -1362,6 +1428,7 @@ mod tests {
         let combined = combine_scope_rows_by_key(
             Err(AppError::internal("system failed")),
             Ok(vec![UnitStatus {
+                scope: "user".to_string(),
                 unit: "user-a.service".to_string(),
                 description: "".to_string(),
                 load_state: "loaded".to_string(),
@@ -1380,5 +1447,34 @@ mod tests {
 
         assert_eq!(combined.len(), 1);
         assert_eq!(combined[0].unit, "user-a.service");
+    }
+
+    #[test]
+    fn combine_scope_rows_preserves_same_unit_name_across_scopes() {
+        let row = |scope: &str| UnitStatus {
+            scope: scope.to_string(),
+            unit: "shared.service".to_string(),
+            description: "".to_string(),
+            load_state: "loaded".to_string(),
+            active_state: "active".to_string(),
+            sub_state: "running".to_string(),
+            unit_file_state: None,
+            since_utc: None,
+            main_pid: None,
+            exec_main_status: None,
+            result: None,
+        };
+
+        let combined = combine_scope_rows_by_key(
+            Ok(vec![row("system")]),
+            Ok(vec![row("user")]),
+            "service units",
+            |unit| unit.unit.as_str(),
+        )
+        .expect("same-name units should be preserved");
+
+        assert_eq!(combined.len(), 2);
+        assert_eq!(combined[0].scope, "system");
+        assert_eq!(combined[1].scope, "user");
     }
 }

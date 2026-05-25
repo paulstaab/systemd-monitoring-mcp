@@ -12,11 +12,39 @@ use serde_json::{Map, Value};
 
 use crate::mcp::rpc::json_rpc_result;
 
+#[derive(Debug)]
+pub struct Pagination<T> {
+    pub rows: Vec<T>,
+    pub total: usize,
+    pub returned: usize,
+    pub truncated: bool,
+}
+
 /// Returns the canonical RFC3339 UTC timestamp string used in tool metadata.
 ///
 /// This keeps `generated_at_utc` formatting consistent across all handlers.
 pub fn generated_at_utc_string() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+/// Applies a result limit and returns consistent pagination metadata.
+///
+/// `total` is the number of matching rows before limiting, `returned` is the
+/// number emitted after limiting, and `truncated` is true only when rows were
+/// dropped. Use this for in-memory tool results where the full match set is
+/// already available.
+pub fn paginate_rows<T>(rows: Vec<T>, limit: usize) -> Pagination<T> {
+    let total = rows.len();
+    let rows = rows.into_iter().take(limit).collect::<Vec<_>>();
+    let returned = rows.len();
+    let truncated = total > returned;
+
+    Pagination {
+        rows,
+        total,
+        returned,
+        truncated,
+    }
 }
 
 /// Builds a standard successful MCP `tools/call` JSON-RPC response.

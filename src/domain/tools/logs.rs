@@ -253,7 +253,7 @@ pub async fn handle_list_logs(
     {
         Ok(log_result) => {
             let returned = log_result.entries.len();
-            let truncated = returned >= normalized.query.limit;
+            let truncated = log_result.has_more;
             let generated_at_utc = generated_at_utc_string();
             let window = serde_json::Map::from_iter([
                 (

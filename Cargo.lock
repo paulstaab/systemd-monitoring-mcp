@@ -1438,6 +1438,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "chrono",
+ "futures-util",
  "hmac",
  "http-body-util",
  "regex",
