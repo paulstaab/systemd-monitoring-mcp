@@ -29,4 +29,4 @@ Use it as a lightweight planning backlog, not as a replacement for issue trackin
 
 ## Developer & Agent Experience
 
-## Packaging And Deployment
+## Packaging and Deployment
