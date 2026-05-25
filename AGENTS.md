@@ -14,6 +14,7 @@ a Linux server over JSON-RPC.
 ## Repository Pointers
 - Requirements: `docs/requirements.md`
 - Implementation plan: `docs/implementation-plan.md`
+- Improvement ideas backlog: `docs/improvement-ideas.md`
 - Entry point: `src/main.rs`
 - App wiring and route composition: `src/lib.rs`
 
@@ -49,6 +50,12 @@ When asked to implement new features or changes, execute the following steps
 - Collect requirements in `docs/requirements.md`. 
 - The MCP should only offer capabilities described in the requirements.
 - Do not include acceptance criteria or test cases in the requirements document.
+
+## Improvement Ideas
+- While working, collect significant future improvement or refactoring ideas in `docs/improvement-ideas.md`.
+- Follow the entry guidelines in that file: keep ideas concise and actionable, include useful file/subsystem/workflow references, and sort each idea under the most relevant category.
+- Add ideas only when they deserve future planning, review, or implementation. It is fine for a coding session to add nothing.
+- Do not use `docs/improvement-ideas.md` as a substitute for required requirements, plans, tests, or issue tracking.
 
 ## Build, Lint, Test
 - Fast compile check:
