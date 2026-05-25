@@ -376,6 +376,7 @@ mod tests {
     fn filters_services_by_state_case_insensitive() {
         let services = vec![
             UnitStatus {
+                scope: "system".to_string(),
                 unit: "a.service".to_string(),
                 description: "A".to_string(),
                 load_state: "loaded".to_string(),
@@ -388,6 +389,7 @@ mod tests {
                 result: None,
             },
             UnitStatus {
+                scope: "system".to_string(),
                 unit: "b.service".to_string(),
                 description: "B".to_string(),
                 load_state: "loaded".to_string(),
@@ -458,6 +460,7 @@ mod tests {
     fn filters_services_by_name_contains() {
         let services = vec![
             UnitStatus {
+                scope: "system".to_string(),
                 unit: "a.service".to_string(),
                 description: "A".to_string(),
                 load_state: "loaded".to_string(),
@@ -470,6 +473,7 @@ mod tests {
                 result: None,
             },
             UnitStatus {
+                scope: "system".to_string(),
                 unit: "b.service".to_string(),
                 description: "B".to_string(),
                 load_state: "loaded".to_string(),
@@ -492,6 +496,7 @@ mod tests {
     fn sorts_failed_first_then_unit() {
         let mut services = vec![
             UnitStatus {
+                scope: "system".to_string(),
                 unit: "z.service".to_string(),
                 description: "Z".to_string(),
                 load_state: "loaded".to_string(),
@@ -504,6 +509,7 @@ mod tests {
                 result: None,
             },
             UnitStatus {
+                scope: "system".to_string(),
                 unit: "a.service".to_string(),
                 description: "A".to_string(),
                 load_state: "loaded".to_string(),

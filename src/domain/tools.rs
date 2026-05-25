@@ -299,6 +299,7 @@ mod tests {
     fn sorts_next_none_last_for_asc() {
         let mut timers = vec![
             TimerItem {
+                scope: "system".to_string(),
                 unit: "unknown.timer".to_string(),
                 active_state: "active".to_string(),
                 sub_state: "waiting".to_string(),
@@ -315,6 +316,7 @@ mod tests {
                 overdue_reason: Some("no_next_run_known".to_string()),
             },
             TimerItem {
+                scope: "system".to_string(),
                 unit: "soon.timer".to_string(),
                 active_state: "active".to_string(),
                 sub_state: "waiting".to_string(),
@@ -342,6 +344,7 @@ mod tests {
     fn sorts_last_none_last_for_desc() {
         let mut timers = vec![
             TimerItem {
+                scope: "system".to_string(),
                 unit: "unknown.timer".to_string(),
                 active_state: "active".to_string(),
                 sub_state: "waiting".to_string(),
@@ -358,6 +361,7 @@ mod tests {
                 overdue_reason: None,
             },
             TimerItem {
+                scope: "system".to_string(),
                 unit: "recent.timer".to_string(),
                 active_state: "active".to_string(),
                 sub_state: "waiting".to_string(),
@@ -374,6 +378,7 @@ mod tests {
                 overdue_reason: None,
             },
             TimerItem {
+                scope: "system".to_string(),
                 unit: "older.timer".to_string(),
                 active_state: "active".to_string(),
                 sub_state: "waiting".to_string(),

@@ -18,9 +18,12 @@ struct MockProvider;
 
 struct DegradedProvider;
 
+struct ScopeCollisionProvider;
+
 fn system_services() -> Vec<UnitStatus> {
     vec![
         UnitStatus {
+            scope: "system".to_string(),
             unit: "z.service".to_string(),
             description: "".to_string(),
             load_state: "loaded".to_string(),
@@ -33,6 +36,7 @@ fn system_services() -> Vec<UnitStatus> {
             result: Some("success".to_string()),
         },
         UnitStatus {
+            scope: "system".to_string(),
             unit: "a.service".to_string(),
             description: "A service".to_string(),
             load_state: "loaded".to_string(),
@@ -45,6 +49,7 @@ fn system_services() -> Vec<UnitStatus> {
             result: None,
         },
         UnitStatus {
+            scope: "system".to_string(),
             unit: "b.service".to_string(),
             description: "B service".to_string(),
             load_state: "loaded".to_string(),
@@ -61,6 +66,7 @@ fn system_services() -> Vec<UnitStatus> {
 
 fn user_services() -> Vec<UnitStatus> {
     vec![UnitStatus {
+        scope: "user".to_string(),
         unit: "user-agent.service".to_string(),
         description: "User agent".to_string(),
         load_state: "loaded".to_string(),
@@ -77,6 +83,7 @@ fn user_services() -> Vec<UnitStatus> {
 fn system_timers() -> Vec<TimerStatus> {
     vec![
         TimerStatus {
+            scope: "system".to_string(),
             unit: "backup.timer".to_string(),
             load_state: "loaded".to_string(),
             active_state: "active".to_string(),
@@ -89,6 +96,7 @@ fn system_timers() -> Vec<TimerStatus> {
             result: Some("success".to_string()),
         },
         TimerStatus {
+            scope: "system".to_string(),
             unit: "stale.timer".to_string(),
             load_state: "loaded".to_string(),
             active_state: "inactive".to_string(),
@@ -101,6 +109,7 @@ fn system_timers() -> Vec<TimerStatus> {
             result: None,
         },
         TimerStatus {
+            scope: "system".to_string(),
             unit: "overdue.timer".to_string(),
             load_state: "loaded".to_string(),
             active_state: "active".to_string(),
@@ -117,6 +126,7 @@ fn system_timers() -> Vec<TimerStatus> {
 
 fn user_timers() -> Vec<TimerStatus> {
     vec![TimerStatus {
+        scope: "user".to_string(),
         unit: "user-sync.timer".to_string(),
         load_state: "loaded".to_string(),
         active_state: "active".to_string(),
@@ -237,11 +247,13 @@ impl UnitProvider for MockProvider {
             entries.reverse();
         }
 
+        let has_more = entries.len() > query.limit;
         entries.truncate(query.limit);
 
         Ok(LogQueryResult {
             entries,
             total_scanned: Some(scanned),
+            has_more,
         })
     }
 
@@ -286,6 +298,7 @@ impl UnitProvider for DegradedProvider {
         Ok(LogQueryResult {
             entries: Vec::new(),
             total_scanned: Some(0),
+            has_more: false,
         })
     }
 
@@ -294,6 +307,79 @@ impl UnitProvider for DegradedProvider {
         _scope: UnitScope,
     ) -> Result<Vec<TimerStatus>, crate::errors::AppError> {
         Ok(Vec::new())
+    }
+}
+
+#[async_trait::async_trait]
+impl UnitProvider for ScopeCollisionProvider {
+    async fn system_state(&self, scope: UnitScope) -> Result<String, crate::errors::AppError> {
+        match scope {
+            UnitScope::System | UnitScope::User => Ok("running".to_string()),
+            UnitScope::Both => Err(crate::errors::AppError::internal(
+                "system_state requires a concrete scope",
+            )),
+        }
+    }
+
+    async fn list_service_units(
+        &self,
+        scope: UnitScope,
+    ) -> Result<Vec<UnitStatus>, crate::errors::AppError> {
+        let row = |scope: &str| UnitStatus {
+            scope: scope.to_string(),
+            unit: "shared.service".to_string(),
+            description: format!("{scope} shared service"),
+            load_state: "loaded".to_string(),
+            active_state: "active".to_string(),
+            sub_state: "running".to_string(),
+            unit_file_state: None,
+            since_utc: None,
+            main_pid: None,
+            exec_main_status: None,
+            result: None,
+        };
+
+        Ok(match scope {
+            UnitScope::System => vec![row("system")],
+            UnitScope::User => vec![row("user")],
+            UnitScope::Both => vec![row("system"), row("user")],
+        })
+    }
+
+    async fn list_journal_logs(
+        &self,
+        _query: &LogQuery,
+    ) -> Result<LogQueryResult, crate::errors::AppError> {
+        Ok(LogQueryResult {
+            entries: Vec::new(),
+            total_scanned: Some(0),
+            has_more: false,
+        })
+    }
+
+    async fn list_timer_units(
+        &self,
+        scope: UnitScope,
+    ) -> Result<Vec<TimerStatus>, crate::errors::AppError> {
+        let row = |scope: &str| TimerStatus {
+            scope: scope.to_string(),
+            unit: "shared.timer".to_string(),
+            load_state: "loaded".to_string(),
+            active_state: "active".to_string(),
+            sub_state: "waiting".to_string(),
+            unit_file_state: None,
+            next_run_utc: None,
+            last_run_utc: None,
+            trigger_unit: None,
+            persistent: None,
+            result: None,
+        };
+
+        Ok(match scope {
+            UnitScope::System => vec![row("system")],
+            UnitScope::User => vec![row("user")],
+            UnitScope::Both => vec![row("system"), row("user")],
+        })
     }
 }
 
@@ -773,6 +859,7 @@ async fn mcp_tools_call_list_timers_returns_structured_content() {
     assert!(body_json["result"]["structuredContent"]["truncated"].is_boolean());
     assert!(body_json["result"]["structuredContent"]["generated_at_utc"].is_string());
     assert!(body_json["result"]["structuredContent"]["timers"][0]["unit"].is_string());
+    assert!(body_json["result"]["structuredContent"]["timers"][0]["scope"].is_string());
     assert!(body_json["result"]["structuredContent"]["timers"][0]["active_state"].is_string());
     assert!(body_json["result"]["structuredContent"]["timers"][0]["overdue"].is_boolean());
     assert!(
@@ -853,7 +940,9 @@ async fn mcp_tools_call_list_timers_summary_with_overdue_only_returns_expected_c
         body_json["result"]["structuredContent"]["summary"]["overdue_count"],
         1
     );
+    assert_eq!(body_json["result"]["structuredContent"]["total_scanned"], 1);
     assert_eq!(body_json["result"]["structuredContent"]["returned"], 1);
+    assert_eq!(body_json["result"]["structuredContent"]["truncated"], false);
     assert!(
         body_json["result"]["structuredContent"]["summary"]["failed_or_problem_timers"]
             .as_array()
@@ -896,6 +985,7 @@ async fn mcp_tools_call_list_services_returns_structured_content() {
     assert!(body_json["result"]["structuredContent"]["truncated"].is_boolean());
     assert!(body_json["result"]["structuredContent"]["generated_at_utc"].is_string());
     assert!(body_json["result"]["structuredContent"]["services"][0]["unit"].is_string());
+    assert!(body_json["result"]["structuredContent"]["services"][0]["scope"].is_string());
     assert!(body_json["result"]["structuredContent"]["services"][0]["active_state"].is_string());
     assert!(body_json["result"]["content"].is_array());
 }
@@ -1159,6 +1249,82 @@ async fn mcp_tools_call_list_timers_scope_both_returns_combined_rows() {
 }
 
 #[tokio::test]
+async fn mcp_tools_call_list_services_scope_both_preserves_same_name_rows() {
+    let response = app_with_provider(Arc::new(ScopeCollisionProvider))
+        .oneshot(
+            Request::builder()
+                .uri("/mcp")
+                .method("POST")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                .body(Body::from(
+                    r#"{"jsonrpc":"2.0","id":325,"method":"tools/call","params":{"name":"list_services","arguments":{"scope":"both"}}}"#,
+                ))
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+    let services = body_json["result"]["structuredContent"]["services"]
+        .as_array()
+        .expect("services array");
+
+    assert_eq!(services.len(), 2);
+    assert!(services
+        .iter()
+        .any(|row| row["unit"] == "shared.service" && row["scope"] == "system"));
+    assert!(services
+        .iter()
+        .any(|row| row["unit"] == "shared.service" && row["scope"] == "user"));
+}
+
+#[tokio::test]
+async fn mcp_tools_call_list_timers_scope_both_preserves_same_name_rows() {
+    let response = app_with_provider(Arc::new(ScopeCollisionProvider))
+        .oneshot(
+            Request::builder()
+                .uri("/mcp")
+                .method("POST")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                .body(Body::from(
+                    r#"{"jsonrpc":"2.0","id":326,"method":"tools/call","params":{"name":"list_timers","arguments":{"scope":"both"}}}"#,
+                ))
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+    let timers = body_json["result"]["structuredContent"]["timers"]
+        .as_array()
+        .expect("timers array");
+
+    assert_eq!(timers.len(), 2);
+    assert!(timers
+        .iter()
+        .any(|row| row["unit"] == "shared.timer" && row["scope"] == "system"));
+    assert!(timers
+        .iter()
+        .any(|row| row["unit"] == "shared.timer" && row["scope"] == "user"));
+}
+
+#[tokio::test]
 async fn mcp_tools_call_list_logs_scope_user_filters_source() {
     let response = app()
         .oneshot(
@@ -1268,6 +1434,66 @@ async fn mcp_tools_call_list_logs_returns_structured_content() {
 }
 
 #[tokio::test]
+async fn mcp_tools_call_list_logs_exact_limit_is_not_truncated() {
+    let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":327,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","limit":3}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+
+    assert_eq!(body_json["result"]["structuredContent"]["returned"], 3);
+    assert_eq!(body_json["result"]["structuredContent"]["truncated"], false);
+}
+
+#[tokio::test]
+async fn mcp_tools_call_list_logs_more_than_limit_is_truncated() {
+    let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/mcp")
+                    .method("POST")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":328,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"2026-02-27T00:00:00Z","end_utc":"2026-02-27T01:00:00Z","limit":2}}}"#,
+                    ))
+                    .expect("request build"),
+            )
+            .await
+            .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+
+    assert_eq!(body_json["result"]["structuredContent"]["returned"], 2);
+    assert_eq!(body_json["result"]["structuredContent"]["truncated"], true);
+}
+
+#[tokio::test]
 async fn mcp_tools_call_list_services_summary_returns_compact_block() {
     let response = app()
             .oneshot(
@@ -1300,6 +1526,9 @@ async fn mcp_tools_call_list_services_summary_returns_compact_block() {
     );
     assert!(body_json["result"]["structuredContent"]["summary"]["failed_units"].is_array());
     assert!(body_json["result"]["structuredContent"]["summary"]["degraded_hint"].is_string());
+    assert!(body_json["result"]["structuredContent"]["total"].is_number());
+    assert!(body_json["result"]["structuredContent"]["returned"].is_number());
+    assert!(body_json["result"]["structuredContent"]["truncated"].is_boolean());
     assert!(body_json["result"]["structuredContent"]
         .get("services")
         .is_none());
@@ -1337,6 +1566,10 @@ async fn mcp_tools_call_list_logs_summary_returns_compact_block() {
     assert!(body_json["result"]["structuredContent"]["summary"]["counts_by_priority"].is_object());
     assert!(body_json["result"]["structuredContent"]["summary"]["top_messages"].is_array());
     assert!(body_json["result"]["structuredContent"]["summary"]["error_hotspots"].is_array());
+    assert!(body_json["result"]["structuredContent"]["total_scanned"].is_number());
+    assert!(body_json["result"]["structuredContent"]["returned"].is_number());
+    assert!(body_json["result"]["structuredContent"]["truncated"].is_boolean());
+    assert!(body_json["result"]["structuredContent"]["window"].is_object());
     assert!(body_json["result"]["structuredContent"]
         .get("logs")
         .is_none());

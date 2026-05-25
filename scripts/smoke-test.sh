@@ -236,6 +236,7 @@ list_timers_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
   "${BASE_URL}/mcp")"
 [[ "$list_timers_status" == "200" ]] || fail "tools/call list_timers returned ${list_timers_status}, expected 200"
 assert_contains "$list_timers_body" '"structuredContent"' "tools/call list_timers did not return structuredContent"
+assert_contains "$list_timers_body" '"scope"' "tools/call list_timers did not include per-row scope"
 
 echo "[smoke] checking POST /mcp tools/call list_timers overdue_only"
 list_timers_overdue_only_body="$(curl -sS -X POST \
@@ -384,6 +385,20 @@ mcp_ping_invalid_token_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST
 [[ "$mcp_ping_invalid_token_status" == "401" ]] || fail "/mcp ping with invalid token returned ${mcp_ping_invalid_token_status}, expected 401"
 assert_contains "$mcp_ping_invalid_token_body" '"code":"invalid_token"' "/mcp ping with invalid token body did not contain invalid_token"
 
+echo "[smoke] checking POST /mcp ping with same-length invalid token"
+mcp_ping_same_length_invalid_token_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me-token-17" \
+  -d '{"jsonrpc":"2.0","id":33,"method":"ping"}' \
+  "${BASE_URL}/mcp")"
+mcp_ping_same_length_invalid_token_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer change-me-token-17" \
+  -d '{"jsonrpc":"2.0","id":33,"method":"ping"}' \
+  "${BASE_URL}/mcp")"
+[[ "$mcp_ping_same_length_invalid_token_status" == "401" ]] || fail "/mcp ping with same-length invalid token returned ${mcp_ping_same_length_invalid_token_status}, expected 401"
+assert_contains "$mcp_ping_same_length_invalid_token_body" '"code":"invalid_token"' "/mcp ping with same-length invalid token body did not contain invalid_token"
+
 echo "[smoke] checking POST /mcp tools/call list_logs"
 list_logs_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
@@ -443,6 +458,7 @@ list_services_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
 [[ "$list_services_status" == "200" ]] || fail "tools/call list_services returned ${list_services_status}, expected 200"
 assert_contains "$list_services_body" '"structuredContent"' "tools/call list_services did not return structuredContent"
 assert_contains "$list_services_body" '"services"' "tools/call list_services did not include services payload"
+assert_contains "$list_services_body" '"scope"' "tools/call list_services did not include per-row scope"
 assert_contains "$list_services_body" '"total"' "tools/call list_services did not include total metadata"
 assert_contains "$list_services_body" '"returned"' "tools/call list_services did not include returned metadata"
 assert_contains "$list_services_body" '"truncated"' "tools/call list_services did not include truncated metadata"
@@ -457,6 +473,9 @@ list_services_summary_body="$(curl -sS -X POST \
 assert_contains "$list_services_summary_body" '"summary"' "tools/call list_services summary did not include summary block"
 assert_contains "$list_services_summary_body" '"counts_by_active_state"' "tools/call list_services summary missing counts_by_active_state"
 assert_contains "$list_services_summary_body" '"failed_units"' "tools/call list_services summary missing failed_units"
+assert_contains "$list_services_summary_body" '"total"' "tools/call list_services summary missing total metadata"
+assert_contains "$list_services_summary_body" '"returned"' "tools/call list_services summary missing returned metadata"
+assert_contains "$list_services_summary_body" '"truncated"' "tools/call list_services summary missing truncated metadata"
 
 echo "[smoke] checking POST /mcp tools/call list_logs invalid limit"
 list_logs_invalid_limit_body="$(curl -sS -X POST \
@@ -482,5 +501,8 @@ list_logs_summary_body="$(curl -sS -X POST \
 assert_contains "$list_logs_summary_body" '"summary"' "tools/call list_logs summary did not include summary block"
 assert_contains "$list_logs_summary_body" '"counts_by_unit"' "tools/call list_logs summary missing counts_by_unit"
 assert_contains "$list_logs_summary_body" '"top_messages"' "tools/call list_logs summary missing top_messages"
+assert_contains "$list_logs_summary_body" '"total_scanned"' "tools/call list_logs summary missing total_scanned metadata"
+assert_contains "$list_logs_summary_body" '"returned"' "tools/call list_logs summary missing returned metadata"
+assert_contains "$list_logs_summary_body" '"truncated"' "tools/call list_logs summary missing truncated metadata"
 
 echo "[smoke] PASS"

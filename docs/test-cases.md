@@ -54,13 +54,14 @@
 - `list_services` defaults to `scope=system` when `scope` is omitted.
 - `list_services` with `scope=user` returns user-manager services.
 - `list_services` with `scope=both` returns combined system and user-manager services.
+- `list_services` with `scope=both` preserves both rows when system and user managers contain the same unit name and identifies each row's source scope.
 - `list_services` with unsupported `scope` value returns JSON-RPC error `-32602` with stable error code `invalid_scope`.
 - `list_services` defaults to `limit=200` and enforces max `limit=1000`.
 - `list_services` with `limit=0` or `limit=1001` returns JSON-RPC error `-32602` with stable error code `invalid_limit`.
 - `list_services` default sorting is by `unit` ascending.
 - `list_services` with `state=failed` applies failed-first then unit sort order.
-- `list_services` structured output includes metadata: `total`, `returned`, `truncated`, `generated_at_utc`.
-- `list_services` with `summary=true` returns compact `summary` block with `counts_by_active_state`, `failed_units`, and `degraded_hint`.
+- `list_services` structured output includes per-row `scope` and metadata: `total`, `returned`, `truncated`, `generated_at_utc`.
+- `list_services` with `summary=true` returns compact `summary` block with `counts_by_active_state`, `failed_units`, and `degraded_hint`, plus metadata: `total`, `returned`, `truncated`, `generated_at_utc`.
 
 ### Tool: `list_logs`
 
@@ -87,7 +88,9 @@
 - `list_logs` with a window larger than 7 days returns JSON-RPC error `-32602` with stable error code `time_range_too_large` unless `allow_large_window=true`.
 - Each log entry includes `timestamp_utc`, `unit`, `priority`, `hostname`, `pid`, `message`, and `cursor`.
 - `list_logs` structured output includes metadata: `total_scanned`, `returned`, `truncated`, `generated_at_utc`, and `window` object.
-- `list_logs` with `summary=true` returns compact `summary` block with `counts_by_unit`, `counts_by_priority`, `top_messages`, and `error_hotspots`.
+- `list_logs` with exactly `limit` matching rows and no additional matching row returns `truncated=false`.
+- `list_logs` with more matching rows than `limit` returns only `limit` rows and `truncated=true`.
+- `list_logs` with `summary=true` returns compact `summary` block with `counts_by_unit`, `counts_by_priority`, `top_messages`, and `error_hotspots`, plus metadata: `total_scanned`, `returned`, `truncated`, `generated_at_utc`, and `window`.
 
 ### Tool: `list_timers`
 
@@ -100,6 +103,7 @@
 - `list_timers` defaults to `scope=system` when `scope` is omitted.
 - `list_timers` with `scope=user` returns user-manager timers.
 - `list_timers` with `scope=both` returns combined system and user-manager timers.
+- `list_timers` with `scope=both` preserves both rows when system and user managers contain the same unit name and identifies each row's source scope.
 - `list_timers` with unsupported `scope` value returns JSON-RPC error `-32602` with stable error code `invalid_scope`.
 - `list_timers` with invalid parameter type (for example `summary="yes"`) returns JSON-RPC error `-32602` with stable error code `invalid_params` (or equivalent stable code).
 - `list_timers` with `sort=next` sorts by nearest next run; `sort=last` sorts by most recent last run; `sort=name` sorts by timer unit; `sort=state` sorts by active state.
@@ -110,8 +114,8 @@
 - Overdue semantics: timer is overdue only if `next_run_utc` is known, current time exceeds `next_run_utc` by more than 5 minutes, and `active_state=active`.
 - Timers without `next_run_utc` are not marked overdue by default and include explanatory `overdue_reason` where applicable.
 - Partial metadata failures (for example trigger or persistence not available) do not fail the call; affected fields are `null`.
-- `list_timers` structured output includes metadata: `total_scanned`, `returned`, `truncated`, `generated_at_utc`.
-- `list_timers` with `summary=true` returns compact `summary` block with `counts_by_active_state`, `overdue_count`, `next_due_soon` (top 5), and `failed_or_problem_timers`.
+- `list_timers` structured output includes per-row `scope` and metadata: `total_scanned`, `returned`, `truncated`, `generated_at_utc`.
+- `list_timers` with `summary=true` returns compact `summary` block with `counts_by_active_state`, `overdue_count`, `next_due_soon` (top 5), and `failed_or_problem_timers`, plus metadata: `total_scanned`, `returned`, `truncated`, `generated_at_utc`.
 
 ## MCP Resources
 

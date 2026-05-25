@@ -83,6 +83,7 @@ Startup behavior:
   - `summary` optional boolean triage mode toggle.
 - If `scope=user`, results must be sourced from the user systemd manager.
 - If `scope=both`, results must combine system and user manager results.
+- Combined `scope=both` results must preserve distinct system and user manager rows even when unit names match.
 - If `state` is provided, only services matching that state must be returned.
 - `state` matching must be case-insensitive.
 - If `name_contains` is provided, only services whose `unit` contains that substring must be returned.
@@ -90,6 +91,7 @@ Startup behavior:
 - If `state=failed`, sorting must be failed-first and then by `unit` ascending.
 - Each item must contain:
   - `unit` (string)
+  - `scope` (string: `system` or `user`)
   - `description` (string)
   - `load_state` (string)
   - `active_state` (string)
@@ -104,6 +106,7 @@ Startup behavior:
   - `returned` (integer): count of returned rows
   - `truncated` (boolean): true when `total > returned`
   - `generated_at_utc` (RFC3339 UTC string)
+- `list_services` summary responses must include the same response metadata fields as detailed responses.
 - If `summary=true`, `list_services` must return a compact summary block including:
   - `counts_by_active_state` (map)
   - `failed_units` (array of objects with `unit`, `sub_state`, `result`, `since_utc`)
@@ -140,9 +143,10 @@ Startup behavior:
 - `list_logs` response metadata must include:
   - `total_scanned` (integer or null)
   - `returned` (integer)
-  - `truncated` (boolean)
+  - `truncated` (boolean): true only when additional matching rows are known to exist beyond `limit`
   - `generated_at_utc` (RFC3339 UTC string)
   - `window` object containing `start_utc` and `end_utc`
+- `list_logs` summary responses must include the same response metadata fields as detailed responses.
 - If `summary=true`, `list_logs` must return a compact summary block including:
   - `counts_by_unit` (top 10)
   - `counts_by_priority`
@@ -164,11 +168,13 @@ Startup behavior:
 - If `name_contains` is provided, only timers whose `unit` contains that substring (case-insensitive) must be returned.
 - If `scope=user`, results must be sourced from the user systemd manager.
 - If `scope=both`, results must combine system and user manager results.
+- Combined `scope=both` results must preserve distinct system and user manager rows even when unit names match.
 - Invalid `limit`, `sort`, or `order` values must return JSON-RPC error `-32602` with stable machine-readable error codes.
 - Invalid parameter types for any `list_timers` input must return JSON-RPC error `-32602` with stable machine-readable error codes.
 - Timer metadata collection failures must not fail the whole response; unresolved fields must be returned as `null` where applicable.
 - Each timer item must include at least:
   - `unit` (string)
+  - `scope` (string: `system` or `user`)
   - `active_state` (string)
   - `sub_state` (string)
   - `next_run_utc` (RFC3339 UTC string or null)
@@ -187,6 +193,7 @@ Startup behavior:
   - `returned` (integer)
   - `truncated` (boolean)
   - `generated_at_utc` (RFC3339 UTC string)
+- `list_timers` summary responses must include the same response metadata fields as detailed responses.
 - Overdue detection rules:
   - A timer is considered overdue only when all are true:
     - `next_run_utc` is known,
