@@ -64,17 +64,17 @@ fn bearer_token_matches(provided: &str, expected: &str) -> bool {
     let mut provided_mac =
         HmacSha256::new_from_slice(AUTH_COMPARE_KEY).expect("static HMAC key is valid");
     provided_mac.update(provided.as_bytes());
-    provided_mac.verify_slice(&expected_tag).is_ok()
+    provided_mac.verify_slice(expected_tag.as_slice()).is_ok()
 }
 
 /// Computes the fixed-size authentication comparison tag for a token string.
 ///
 /// The return value is only used inside `bearer_token_matches`; callers should
 /// never log or expose it because it is derived from bearer credential material.
-fn token_hmac(token: &str) -> Vec<u8> {
+fn token_hmac(token: &str) -> hmac::digest::Output<HmacSha256> {
     let mut mac = HmacSha256::new_from_slice(AUTH_COMPARE_KEY).expect("static HMAC key is valid");
     mac.update(token.as_bytes());
-    mac.finalize().into_bytes().to_vec()
+    mac.finalize().into_bytes()
 }
 
 #[cfg(test)]
