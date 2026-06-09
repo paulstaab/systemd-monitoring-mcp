@@ -6,7 +6,7 @@ use axum::{
     response::Response,
 };
 use axum_extra::headers::{authorization::Bearer, Authorization, Header};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
 use crate::{errors::AppError, AppState};
