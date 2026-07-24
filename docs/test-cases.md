@@ -151,3 +151,10 @@
 - Command and health-test argv redact case-insensitive credential values supplied as separate arguments, `--flag=value`, and `NAME=value` assignments.
 - Non-sensitive argv ordering and values remain intact.
 - Health configuration exposes only sanitized test argv and timing/retry fields and never health logs or unrelated raw metadata.
+
+## Review Follow-up: Unit Inspection
+
+- `since_last_start=true` with an unsupported scope returns stable `invalid_scope`, not `invalid_unit`.
+- Production unit inspection reads direct `Requires` and `Wants`, reports failed/missing/unloaded dependencies, preserves relationship type, and never traverses recursively.
+- Transition lookup recognizes canonical systemd starting, started, stopping, stopped, failed, reloading, and reloaded message IDs; output is newest-first and capped by `transition_limit`.
+- Journal transition scanning is bounded even when no matching unit transition exists.

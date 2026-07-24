@@ -393,7 +393,7 @@ pub async fn handle_list_logs(
                 return app_error_to_json_rpc(
                     id,
                     AppError::bad_request(
-                        "invalid_unit",
+                        "invalid_scope",
                         "since_last_start requires one unit and system or user scope",
                     ),
                 )

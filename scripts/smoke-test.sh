@@ -526,6 +526,8 @@ if [[ -n "$unit_fixture" ]]; then
     -d "{\"jsonrpc\":\"2.0\",\"id\":170,\"method\":\"tools/call\",\"params\":{\"name\":\"get_unit_status\",\"arguments\":{\"unit\":\"${unit_fixture}\"}}}" \
     "${BASE_URL}/mcp")"
   assert_contains "$unit_status_body" '"structuredContent"' "get_unit_status did not return structuredContent"
+  assert_contains "$unit_status_body" '"failed_dependencies"' "get_unit_status did not include failed_dependencies"
+  assert_contains "$unit_status_body" '"recent_transitions"' "get_unit_status did not include recent_transitions"
 fi
 
 if command -v podman >/dev/null 2>&1; then
