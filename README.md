@@ -27,6 +27,12 @@ that takes care of TLS termination and restricts network access.
 
 **DO NOT EXPOSE THIS TO THE INTERNET!**
 
+See [Security and Threat Model](docs/security.md) for the authenticated-client and runaway-agent
+threat boundary, attack scenarios, controls, and residual risks. The server permits read-only,
+non-secret monitoring disclosure and accepts denial-of-service risk only from token-holding clients,
+but it must not permit persistent host/workload modification or intentional secret disclosure. Because
+it uses plain HTTP and a static bearer token, use TLS and network access controls whenever traffic crosses an untrusted network.
+
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `MCP_API_TOKEN` | **yes** | — | Static API token (minimum 16 characters). |

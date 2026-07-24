@@ -2,16 +2,34 @@
 
 ## HTTP Transport and Security
 
+Case 1 — network access without a valid token:
+
 - `GET /health` returns `200` with `{ "status": "ok" }` and no sensitive fields.
+- `GET /health` has an exact fixed response shape and exposes no host-derived fields.
+- `GET /.well-known/mcp` exposes only package name, package version, and the `/mcp` endpoint path.
+- Unauthenticated systemd status requests do not invoke providers or include manager state.
 - `GET /systemd/system/status` without authorization header returns `401` with `missing_token` code.
-- `GET /systemd/system/status` with valid bearer token returns `200` with `scope=system` and `status=running` when the system manager is running.
-- `GET /systemd/user/status` with valid bearer token returns `200` with `scope=user` and `status=running` when the user manager is running.
-- Systemd status endpoints with valid bearer token return `503` with structured HTTP error body when the manager status is `degraded`.
 - `POST /mcp` without authorization header returns `401` with `missing_token` code.
 - `POST /mcp` with non-bearer auth scheme returns `401` with `invalid_token` code.
 - `POST /mcp` with malformed authorization header value (header present but unparsable) returns `401` with `invalid_token` code.
 - `POST /mcp` with invalid bearer token returns `401` with `invalid_token` code.
+- Unauthenticated and invalid-token requests are rejected before any systemd, journal, or Podman provider work.
+- Unauthenticated and invalid-token `/mcp` requests cannot invoke tools or resources and include no monitoring data.
+
+Case 2 — network access with a valid token, including a malicious client or runaway agent:
+
+- A valid token permits only documented read-only monitoring operations and non-critical monitoring disclosure.
+- `GET /systemd/system/status` with valid bearer token returns `200` with `scope=system` and `status=running` when the system manager is running.
+- Repeated or expensive authenticated requests may deny service; this is an accepted risk for Case 2 only.
+- `GET /systemd/user/status` with valid bearer token returns `200` with `scope=user` and `status=running` when the user manager is running.
+- Systemd status endpoints with valid bearer token return `503` with structured HTTP error body when the manager status is `degraded`.
 - Bearer token validation uses HMAC-based fixed-size comparison and rejects same-length and different-length mismatches.
+- Advertised and implemented capabilities contain no persistent host- or workload-mutating operation; guessed mutation methods fail closed.
+- Hostile identifiers cannot add shell arguments or execute commands.
+- Successful responses omit documented secret-bearing provider fields and redact credential-like argv values.
+- Application logs omit bearer tokens, environment secrets, and known credential-bearing parameters.
+- Client-facing failures do not expose host paths, bus diagnostics, command output, or environment values.
+- Free-form fixture data containing secret-like values verifies documented sanitization boundaries without claiming arbitrary journal-secret detection.
 
 ## MCP Discovery and Initialize
 

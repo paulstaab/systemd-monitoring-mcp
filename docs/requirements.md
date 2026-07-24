@@ -221,6 +221,26 @@ Startup behavior:
 
 ## 4. Authentication and Security
 
+Security objective:
+
+Case 1 — network access without a valid token:
+- The actor must not be able to invoke MCP capabilities or authenticated operational endpoints.
+- The actor must not obtain host monitoring data or secrets.
+- The actor must not make persistent changes to the host or its workloads through this server.
+- The actor must not trigger monitoring-provider work; authentication must fail before provider access.
+- The actor may obtain the fixed public health response, public discovery metadata, and network-level signals. These are accepted non-critical disclosures.
+
+Case 2 — network access with a valid token, including a malicious client or runaway agent:
+- The actor may invoke documented read-only monitoring capabilities and obtain the non-critical monitoring information they return.
+- The actor must not obtain intentionally held secrets, including credentials, tokens, environment secrets, host mount sources, or other secret-bearing provider fields.
+- The actor must not make persistent changes to the host or its workloads through this server.
+- Denial of service against the server is an accepted risk for this actor.
+
+For both cases:
+- No response or application log may intentionally expose secrets.
+- All current and future MCP capabilities and provider adapters must remain read-only. Mutating systemd, journal, process, filesystem, container, pod, network, package, or host-configuration operations are out of scope.
+- Data that an application writes into an otherwise permitted free-form monitoring field, especially a journal message, cannot be reliably classified as secret. Operators must not write secrets to monitoring sources exposed by this server.
+
 Token validation:
 - Bearer token comparison must use a constant-time algorithm (HMAC-based) to prevent timing side-channel attacks.
 - `MCP_API_TOKEN` must be at least 16 characters; shorter values must be rejected at startup.
@@ -239,6 +259,10 @@ Input Validation:
 
 Tool safety constraints:
 - Timer tooling must remain read-only and must not start, stop, or modify timers/services.
+- Provider inputs must be strictly validated and passed through typed APIs or fixed argument vectors without shell interpretation.
+- Authentication, validation, and client-facing provider failures must not include host-derived diagnostics or secret data.
+- Response minimization and log redaction must exclude known secret-bearing fields, credentials, environment values, and host mount sources.
+- Security assumptions, attack scenarios, controls, and residual risks are documented in `docs/security.md`.
 
 ## 5. Error Model
 
