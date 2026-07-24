@@ -275,3 +275,34 @@ Sensitive data handling:
 - Never log bearer token values from requests.
 - Never log raw credentials contained in MCP params.
 - Never expose service environment or secret values while reporting timer trigger data.
+
+## 7. Structured Runtime Inspection and Paginated Logs
+
+### 7.1 Detailed Unit Status
+
+- `get_unit_status` requires a valid `*.service` `unit`, accepts `scope=system|user` (default `system`), and accepts `transition_limit=1..100` (default `20`).
+- The response contains the service fields plus nullable `exec_main_status`, `result`, `restart_count`, and `timestamps` fields for state change, active/inactive enter/exit, and main-process start/exit.
+- Each optional D-Bus property is best-effort independently; one unavailable property must not erase other enrichment.
+- `failed_dependencies` contains failed, missing, or unloaded direct `Requires`/`Wants` only and does not recurse.
+- `recent_transitions` is newest-first and contains timestamp, transition kind, message, and cursor for recognized systemd transition message IDs.
+- `list_services` adds `restart_count` and the timestamp object and retains `since_utc`.
+
+### 7.2 Podman Inspection
+
+- `get_container_status(container)` and `get_pod_status(pod)` provide compact read-only local inspection.
+- Podman is optional, is not checked at startup, and is invoked without a shell using validated identifiers and individual fixed arguments.
+- CLI execution has a short timeout and bounded stdout/stderr. Missing CLI/runtime maps to `podman_unavailable`, unknown targets to `container_not_found`/`pod_not_found`, and malformed or oversized results to stable provider errors.
+- Container results include compact state, exit/error and lifecycle timestamps, restart count, image identity, configured and nullable runtime/host identity, mounts/read-only flags, health status/config without logs, argv commands, and pod ID.
+- Pod results include ID, name, state, creation time, restart policy, infra ID, shared namespaces, and compact member state.
+- Labels, annotations, OCI blobs, health logs, and other verbose inspect metadata are excluded.
+
+### 7.3 Resumable Logs
+
+- `list_logs` accepts optional `cursor`, unique `fields`, `group_by=message`, and `since_last_start`.
+- `fields` may contain only `timestamp_utc`, `unit`, `priority`, `hostname`, `pid`, `message`, and `cursor`; omission returns all fields.
+- A cursor resumes exclusively in the selected order. Invalid/expired cursors return `invalid_cursor`; callers must retain the original scope, filters, window, grouping, and projection.
+- `next_cursor` is returned only when another matching raw row exists. Page metadata describes the current page.
+- `since_last_start=true` requires exactly one unit and no explicit `start_utc`, derives the bound from its latest main-process start, and returns `unit_start_unavailable` when unknown.
+- Plain `grep` remains case-sensitive literal matching. Slash-delimited values are Rust regular expressions, including alternation such as `/ERROR|fatal/`.
+- `group_by=message` groups identical `(unit, priority, message)` values within the fetched raw page and adds `count`, `first_timestamp_utc`, and `last_timestamp_utc`; continuation advances over raw rows.
+- The seven-day window is inclusive. Oversized-window errors include `maximum_start_utc = end_utc - 7 days` in structured details.

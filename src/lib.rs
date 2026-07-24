@@ -13,14 +13,17 @@ pub mod errors;
 pub mod http;
 pub mod logging;
 pub mod mcp;
+pub mod podman;
 pub mod systemd_client;
 
+use podman::{CliPodmanProvider, PodmanProvider};
 use systemd_client::UnitProvider;
 
 #[derive(Clone)]
 pub struct AppState {
     pub api_token: Arc<str>,
     pub unit_provider: Arc<dyn UnitProvider>,
+    pub podman_provider: Arc<dyn PodmanProvider>,
 }
 
 impl AppState {
@@ -29,7 +32,14 @@ impl AppState {
         Self {
             api_token: Arc::from(api_token),
             unit_provider,
+            podman_provider: Arc::new(CliPodmanProvider),
         }
+    }
+
+    /// Replaces the Podman adapter, primarily for deterministic tests.
+    pub fn with_podman_provider(mut self, podman_provider: Arc<dyn PodmanProvider>) -> Self {
+        self.podman_provider = podman_provider;
+        self
     }
 }
 

@@ -16,7 +16,7 @@ use zbus::{zvariant::OwnedObjectPath, Connection, Proxy};
 
 use crate::errors::AppError;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnitStatus {
     pub unit: String,
     pub scope: String,
@@ -31,6 +31,34 @@ pub struct UnitStatus {
     pub result: Option<String>,
 }
 
+impl Serialize for UnitStatus {
+    /// Serializes compatibility service fields plus additive restart/timestamp metadata.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(14))?;
+        map.serialize_entry("unit", &self.unit)?;
+        map.serialize_entry("scope", &self.scope)?;
+        map.serialize_entry("description", &self.description)?;
+        map.serialize_entry("load_state", &self.load_state)?;
+        map.serialize_entry("active_state", &self.active_state)?;
+        map.serialize_entry("sub_state", &self.sub_state)?;
+        map.serialize_entry("unit_file_state", &self.unit_file_state)?;
+        map.serialize_entry("since_utc", &self.since_utc)?;
+        map.serialize_entry("main_pid", &self.main_pid)?;
+        map.serialize_entry("exec_main_status", &self.exec_main_status)?;
+        map.serialize_entry("result", &self.result)?;
+        map.serialize_entry("restart_count", &Option::<u32>::None)?;
+        map.serialize_entry(
+            "timestamps",
+            &serde_json::json!({
+                "state_change": null, "active_enter": self.since_utc,
+                "active_exit": null, "inactive_enter": null, "inactive_exit": null,
+                "main_process_start": null, "main_process_exit": null
+            }),
+        )?;
+        map.end()
+    }
+}
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TimerStatus {
     pub unit: String,
@@ -57,6 +85,7 @@ pub struct LogQuery {
     pub start_utc: Option<DateTime<Utc>>,
     pub end_utc: Option<DateTime<Utc>>,
     pub limit: usize,
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,6 +229,28 @@ pub trait UnitProvider: Send + Sync {
     async fn system_state(&self, scope: UnitScope) -> Result<String, AppError>;
     /// Lists systemd `*.service` units for the requested manager scope.
     async fn list_service_units(&self, scope: UnitScope) -> Result<Vec<UnitStatus>, AppError>;
+    /// Inspects one service; adapters may override to add dependency and transition detail.
+    async fn get_unit_status(
+        &self,
+        unit: &str,
+        scope: UnitScope,
+        _transition_limit: usize,
+    ) -> Result<serde_json::Value, AppError> {
+        let row = self
+            .list_service_units(scope)
+            .await?
+            .into_iter()
+            .find(|row| row.unit == unit)
+            .ok_or_else(|| {
+                AppError::bad_request("unit_not_found", "systemd service unit was not found")
+            })?;
+        let mut value = serde_json::to_value(row).expect("unit status serialization");
+        if let Some(object) = value.as_object_mut() {
+            object.insert("failed_dependencies".to_string(), serde_json::json!([]));
+            object.insert("recent_transitions".to_string(), serde_json::json!([]));
+        }
+        Ok(value)
+    }
     /// Lists systemd timer units with scheduling/trigger metadata when available.
     ///
     /// Implementations should prefer returning partial records with nullable fields
@@ -207,6 +258,20 @@ pub trait UnitProvider: Send + Sync {
     async fn list_timer_units(&self, scope: UnitScope) -> Result<Vec<TimerStatus>, AppError>;
     /// Lists journald log entries that satisfy the provided query constraints.
     async fn list_journal_logs(&self, query: &LogQuery) -> Result<LogQueryResult, AppError>;
+    /// Returns the most recent main-process start for a service when available.
+    async fn unit_main_start(
+        &self,
+        unit: &str,
+        scope: UnitScope,
+    ) -> Result<Option<DateTime<Utc>>, AppError> {
+        let rows = self.list_service_units(scope).await?;
+        Ok(rows
+            .into_iter()
+            .find(|row| row.unit == unit)
+            .and_then(|row| row.since_utc)
+            .and_then(|value| DateTime::parse_from_rfc3339(&value).ok())
+            .map(|value| value.with_timezone(&Utc)))
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1089,29 +1154,37 @@ fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
         ));
     };
 
-    match query.order {
-        LogOrder::Desc => {
-            let end_unix_usec = end_utc.timestamp_micros();
-            if let Ok(end_unix_usec) = u64::try_from(end_unix_usec) {
-                reader.seek_realtime_usec(end_unix_usec).map_err(|err| {
-                    AppError::internal(format!("failed to seek journald end timestamp: {err}"))
-                })?;
-            } else {
-                reader.seek_tail().map_err(|err| {
-                    AppError::internal(format!("failed to seek journald tail: {err}"))
-                })?;
+    if let Some(cursor) = query.cursor.as_deref() {
+        reader.seek_cursor(cursor).map_err(|_| {
+            AppError::bad_request("invalid_cursor", "journal cursor is invalid or expired")
+        })?;
+    } else {
+        match query.order {
+            LogOrder::Desc => {
+                let end_unix_usec = end_utc.timestamp_micros();
+                if let Ok(end_unix_usec) = u64::try_from(end_unix_usec) {
+                    reader.seek_realtime_usec(end_unix_usec).map_err(|err| {
+                        AppError::internal(format!("failed to seek journald end timestamp: {err}"))
+                    })?;
+                } else {
+                    reader.seek_tail().map_err(|err| {
+                        AppError::internal(format!("failed to seek journald tail: {err}"))
+                    })?;
+                }
             }
-        }
-        LogOrder::Asc => {
-            let start_unix_usec = start_utc.timestamp_micros();
-            if let Ok(start_unix_usec) = u64::try_from(start_unix_usec) {
-                reader.seek_realtime_usec(start_unix_usec).map_err(|err| {
-                    AppError::internal(format!("failed to seek journald start timestamp: {err}"))
-                })?;
-            } else {
-                reader.seek_head().map_err(|err| {
-                    AppError::internal(format!("failed to seek journald head: {err}"))
-                })?;
+            LogOrder::Asc => {
+                let start_unix_usec = start_utc.timestamp_micros();
+                if let Ok(start_unix_usec) = u64::try_from(start_unix_usec) {
+                    reader.seek_realtime_usec(start_unix_usec).map_err(|err| {
+                        AppError::internal(format!(
+                            "failed to seek journald start timestamp: {err}"
+                        ))
+                    })?;
+                } else {
+                    reader.seek_head().map_err(|err| {
+                        AppError::internal(format!("failed to seek journald head: {err}"))
+                    })?;
+                }
             }
         }
     }

@@ -135,3 +135,11 @@
 - Startup and request logs include method/path/status/duration and authentication failures, without exposing token values.
 - Every action executed through the MCP server emits an INFO-level audit log event.
 - Audit log events include action parameters with sensitive fields redacted (for example token, password, secret, credentials).
+
+## Structured Runtime Inspection and Pagination
+
+- `get_unit_status` covers complete/partial properties, both concrete scopes, invalid/non-service/missing units, direct failed/missing dependencies, newest-first bounded transitions, and no recursion.
+- Podman inspection covers running/stopped/unhealthy/rootless/read-only/mounted and pod-member fixtures, unavailable CLI/runtime, timeout, nonzero/not-found, malformed/oversized JSON, hostile identifiers, and exclusion of verbose metadata.
+- Log pagination covers ascending/descending exclusive continuation without gaps or duplicates, exhausted/invalid cursors, filter continuity, all projections, invalid/duplicate fields, grouping counts/order and raw-page continuation.
+- Log bounds cover literal versus slash-delimited regex grep, unit-start derivation/unavailability, exact seven-day acceptance, and `maximum_start_utc` error details.
+- `tools/list` advertises strict schemas for `get_unit_status`, `get_container_status`, and `get_pod_status`; successful calls use `structuredContent` and failures preserve stable JSON-RPC shapes.

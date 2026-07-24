@@ -11,7 +11,7 @@ use crate::domain::utils::{
 use crate::mcp::rpc::{app_error_to_json_rpc, json_rpc_invalid_params};
 use crate::{
     errors::AppError,
-    systemd_client::{LogOrder, LogQuery},
+    systemd_client::{LogOrder, LogQuery, UnitScope},
     AppState,
 };
 
@@ -21,6 +21,8 @@ use super::LogsQueryParams;
 struct NormalizedLogsQuery {
     query: LogQuery,
     summary_enabled: bool,
+    fields: Vec<String>,
+    group_by_message: bool,
 }
 
 enum NormalizeLogsError {
@@ -127,6 +129,109 @@ fn build_log_summary(entries: &[crate::systemd_client::JournalLogEntry]) -> LogS
     }
 }
 
+/// Validates the optional log field projection and rejects duplicates.
+fn normalize_fields(fields: Option<Vec<String>>) -> Result<Vec<String>, AppError> {
+    const ALL: [&str; 7] = [
+        "timestamp_utc",
+        "unit",
+        "priority",
+        "hostname",
+        "pid",
+        "message",
+        "cursor",
+    ];
+    let fields = fields.unwrap_or_else(|| ALL.iter().map(|value| (*value).to_string()).collect());
+    if fields.is_empty() {
+        return Err(AppError::bad_request(
+            "invalid_fields",
+            "fields must not be empty",
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for field in &fields {
+        if !ALL.contains(&field.as_str()) || !seen.insert(field.clone()) {
+            return Err(AppError::bad_request(
+                "invalid_fields",
+                "fields must be unique supported log fields",
+            ));
+        }
+    }
+    Ok(fields)
+}
+
+/// Validates page-local grouping selection.
+fn normalize_group_by(group_by: Option<String>) -> Result<bool, AppError> {
+    match group_by.as_deref() {
+        None => Ok(false),
+        Some("message") => Ok(true),
+        _ => Err(AppError::bad_request(
+            "invalid_group_by",
+            "group_by must be message",
+        )),
+    }
+}
+
+/// Projects one typed journal row into requested public fields.
+fn project_entry(
+    entry: &crate::systemd_client::JournalLogEntry,
+    fields: &[String],
+) -> serde_json::Map<String, Value> {
+    let full = serde_json::to_value(entry).expect("journal entry serialization");
+    fields
+        .iter()
+        .filter_map(|field| full.get(field).cloned().map(|value| (field.clone(), value)))
+        .collect()
+}
+
+/// Groups a raw page by `(unit, priority, message)` while preserving first-seen order.
+fn group_entries(
+    entries: &[crate::systemd_client::JournalLogEntry],
+    fields: &[String],
+) -> Vec<Value> {
+    type Group = (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        usize,
+        String,
+        String,
+        serde_json::Map<String, Value>,
+    );
+    let mut groups: Vec<Group> = Vec::new();
+    for entry in entries {
+        if let Some(group) = groups.iter_mut().find(|group| {
+            group.0 == entry.unit && group.1 == entry.priority && group.2 == entry.message
+        }) {
+            group.3 += 1;
+            if entry.timestamp_utc < group.4 {
+                group.4 = entry.timestamp_utc.clone();
+            }
+            if entry.timestamp_utc > group.5 {
+                group.5 = entry.timestamp_utc.clone();
+            }
+        } else {
+            groups.push((
+                entry.unit.clone(),
+                entry.priority.clone(),
+                entry.message.clone(),
+                1,
+                entry.timestamp_utc.clone(),
+                entry.timestamp_utc.clone(),
+                project_entry(entry, fields),
+            ));
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(_, _, _, count, first, last, mut row)| {
+            row.insert("count".to_string(), json!(count));
+            row.insert("first_timestamp_utc".to_string(), json!(first));
+            row.insert("last_timestamp_utc".to_string(), json!(last));
+            Value::Object(row)
+        })
+        .collect()
+}
+
 /// Validates and normalizes `list_logs` query parameters into an execution query.
 ///
 /// Enforces required time range, UTC semantics, time-window bounds, limit caps,
@@ -153,9 +258,10 @@ pub fn build_log_query(params: LogsQueryParams) -> Result<LogQuery, AppError> {
         let allow_large_window = params.allow_large_window.unwrap_or(false);
         let seven_days = Duration::days(7);
         if !allow_large_window && (*end - *start) > seven_days {
-            return Err(AppError::bad_request(
+            return Err(AppError::bad_request_with_details(
                 "time_range_too_large",
                 "time window must not exceed 7 days unless allow_large_window is true",
+                json!({"maximum_start_utc": (*end - seven_days).to_rfc3339_opts(chrono::SecondsFormat::Millis, true)}),
             ));
         }
     }
@@ -209,6 +315,7 @@ pub fn build_log_query(params: LogsQueryParams) -> Result<LogQuery, AppError> {
         start_utc,
         end_utc,
         limit: limit as usize,
+        cursor: params.cursor.filter(|value| !value.trim().is_empty()),
     })
 }
 
@@ -223,11 +330,17 @@ fn normalize_logs_query(
         serde_json::from_value(json!(arguments.unwrap_or_default()))
             .map_err(|_| NormalizeLogsError::InvalidParams)?;
     let summary_enabled = query_params.summary.unwrap_or(false);
+    let fields =
+        normalize_fields(query_params.fields.clone()).map_err(NormalizeLogsError::Domain)?;
+    let group_by_message =
+        normalize_group_by(query_params.group_by.clone()).map_err(NormalizeLogsError::Domain)?;
     let query = build_log_query(query_params).map_err(NormalizeLogsError::Domain)?;
 
     Ok(NormalizedLogsQuery {
         query,
         summary_enabled,
+        fields,
+        group_by_message,
     })
 }
 
@@ -240,7 +353,72 @@ pub async fn handle_list_logs(
     id: Option<Value>,
     arguments: Option<serde_json::Map<String, Value>>,
 ) -> Value {
-    let normalized = match normalize_logs_query(arguments) {
+    let mut arguments = arguments.unwrap_or_default();
+    if arguments.get("since_last_start").and_then(Value::as_bool) == Some(true) {
+        if arguments.contains_key("start_utc") {
+            return app_error_to_json_rpc(
+                id,
+                AppError::bad_request(
+                    "invalid_time_range",
+                    "start_utc must be omitted with since_last_start",
+                ),
+            );
+        }
+        let unit = match normalize_unit(
+            arguments
+                .get("unit")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        ) {
+            Ok(Some(unit)) => unit,
+            _ => {
+                return app_error_to_json_rpc(
+                    id,
+                    AppError::bad_request(
+                        "invalid_unit",
+                        "since_last_start requires exactly one unit",
+                    ),
+                )
+            }
+        };
+        let scope = match normalize_scope(
+            arguments
+                .get("scope")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        ) {
+            Ok(UnitScope::System) => UnitScope::System,
+            Ok(UnitScope::User) => UnitScope::User,
+            _ => {
+                return app_error_to_json_rpc(
+                    id,
+                    AppError::bad_request(
+                        "invalid_unit",
+                        "since_last_start requires one unit and system or user scope",
+                    ),
+                )
+            }
+        };
+        match state.unit_provider.unit_main_start(&unit, scope).await {
+            Ok(Some(start)) => {
+                arguments.insert(
+                    "start_utc".to_string(),
+                    json!(start.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+                );
+            }
+            Ok(None) => {
+                return app_error_to_json_rpc(
+                    id,
+                    AppError::bad_request(
+                        "unit_start_unavailable",
+                        "unit main-process start is unavailable",
+                    ),
+                )
+            }
+            Err(err) => return app_error_to_json_rpc(id, err),
+        }
+    }
+    let normalized = match normalize_logs_query(Some(arguments)) {
         Ok(value) => value,
         Err(NormalizeLogsError::InvalidParams) => return json_rpc_invalid_params(id),
         Err(NormalizeLogsError::Domain(err)) => return app_error_to_json_rpc(id, err),
@@ -252,8 +430,29 @@ pub async fn handle_list_logs(
         .await
     {
         Ok(log_result) => {
-            let returned = log_result.entries.len();
             let truncated = log_result.has_more;
+            let next_cursor = if truncated {
+                log_result
+                    .entries
+                    .last()
+                    .and_then(|entry| entry.cursor.clone())
+            } else {
+                None
+            };
+            let detailed_rows = if normalized.group_by_message {
+                group_entries(&log_result.entries, &normalized.fields)
+            } else {
+                log_result
+                    .entries
+                    .iter()
+                    .map(|entry| Value::Object(project_entry(entry, &normalized.fields)))
+                    .collect::<Vec<_>>()
+            };
+            let returned = if normalized.group_by_message {
+                detailed_rows.len()
+            } else {
+                log_result.entries.len()
+            };
             let generated_at_utc = generated_at_utc_string();
             let window = serde_json::Map::from_iter([
                 (
@@ -284,6 +483,7 @@ pub async fn handle_list_logs(
                         ("total_scanned".to_string(), json!(log_result.total_scanned)),
                         ("returned".to_string(), json!(returned)),
                         ("truncated".to_string(), json!(truncated)),
+                        ("next_cursor".to_string(), json!(next_cursor)),
                         ("generated_at_utc".to_string(), json!(generated_at_utc)),
                         ("window".to_string(), Value::Object(window)),
                     ]),
@@ -294,10 +494,19 @@ pub async fn handle_list_logs(
                 id,
                 format!("Returned {returned} log entries"),
                 serde_json::Map::from_iter([
-                    ("logs".to_string(), json!(log_result.entries)),
+                    (
+                        (if normalized.group_by_message {
+                            "groups"
+                        } else {
+                            "logs"
+                        })
+                        .to_string(),
+                        json!(detailed_rows),
+                    ),
                     ("total_scanned".to_string(), json!(log_result.total_scanned)),
                     ("returned".to_string(), json!(returned)),
                     ("truncated".to_string(), json!(truncated)),
+                    ("next_cursor".to_string(), json!(next_cursor)),
                     ("generated_at_utc".to_string(), json!(generated_at_utc)),
                     ("window".to_string(), Value::Object(window)),
                 ]),
