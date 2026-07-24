@@ -13,6 +13,7 @@ a Linux server over JSON-RPC.
 
 ## Repository Pointers
 - Requirements: `docs/requirements.md`
+- Security threat model: `docs/security.md`
 - Implementation plan: `docs/implementation-plan.md`
 - Entry point: `src/main.rs`
 - App wiring and route composition: `src/lib.rs`
@@ -88,6 +89,26 @@ Copy-paste one-liner:
 - Preserve JSON-RPC error shape for MCP method failures.
 - Never log secrets (`MCP_API_TOKEN` or bearer token values).
 - Keep non-systemd-dependent logic testable via abstractions/mocks.
+
+## Security Review Instructions
+
+During every code review, explicitly evaluate the change against both attacker cases in
+`docs/security.md`:
+
+1. **Network access without a valid token**
+   - Confirm the change exposes no host monitoring data or secrets.
+   - Confirm protected work is rejected before systemd, journal, Podman, or other provider access.
+   - Treat application-level denial of service by this actor as a security issue.
+2. **Network access with a valid token**, including a malicious client or runaway agent
+   - Confirm the change cannot make persistent host or workload modifications.
+   - Confirm responses, errors, and logs expose no intentionally held secrets or raw secret-bearing
+     provider fields.
+   - Denial of service against the server is an accepted risk only for this case.
+
+Flag a review finding when either case is not addressed by the implementation and tests. Pay special
+attention to authentication placement, mutation paths, shell/argument injection, response projection,
+error details, logging/redaction, and newly advertised MCP capabilities.
+Ignore security problems that are already listed in docs/improvement-ideas.md.
 
 ## MCP Protocol Notes
 - Prefer implementing monitoring functionality through MCP methods (`tools/list`, `tools/call`, `resources/list`, `resources/read`) instead of REST business endpoints.

@@ -173,6 +173,22 @@ health_body="$(curl -sS "${BASE_URL}/health")"
 health_status="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/health")"
 [[ "$health_status" == "200" ]] || fail "/health returned status ${health_status}, expected 200"
 assert_contains "$health_body" '"status":"ok"' "/health body did not contain expected status"
+[[ "$health_body" == '{"status":"ok"}' ]] || fail "/health exposed fields beyond the fixed public response"
+
+echo "[smoke] checking unauthenticated /mcp"
+unauthenticated_mcp_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":0,"method":"tools/list","params":{}}' \
+  "${BASE_URL}/mcp")"
+unauthenticated_mcp_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":0,"method":"tools/list","params":{}}' \
+  "${BASE_URL}/mcp")"
+[[ "$unauthenticated_mcp_status" == "401" ]] || fail "unauthenticated /mcp returned ${unauthenticated_mcp_status}, expected 401"
+assert_contains "$unauthenticated_mcp_body" '"code":"missing_token"' "unauthenticated /mcp did not return missing_token"
+assert_not_contains "$unauthenticated_mcp_body" '"result"' "unauthenticated /mcp exposed a JSON-RPC result"
+assert_not_contains "$unauthenticated_mcp_body" '"tools"' "unauthenticated /mcp exposed tool metadata"
+
 
 echo "[smoke] checking GET /systemd/system/status"
 systemd_system_status_body="$(curl -sS -H "Authorization: Bearer ${TOKEN}" "${BASE_URL}/systemd/system/status")"
