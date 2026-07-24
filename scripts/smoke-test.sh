@@ -548,14 +548,23 @@ logs_page_body="$(curl -sS -X POST \
   -H "Authorization: Bearer ${TOKEN}" \
   -d '{"jsonrpc":"2.0","id":172,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"2100-01-01T00:00:00Z","allow_large_window":true,"limit":1}}}' \
   "${BASE_URL}/mcp")"
-assert_contains "" '"next_cursor"' "list_logs page did not include next_cursor"
+assert_contains "$logs_page_body" '"next_cursor"' "list_logs page did not include next_cursor"
+
 if command -v jq >/dev/null 2>&1; then
-  next_cursor="1000 997 998 999 1000printf '%s' "" | jq -r '.result.structuredContent.next_cursor // empty')"
-  if [[ -n "" ]]; then
-    second_page_payload="1000 997 998 999 1000jq -cn --arg cursor "" '{jsonrpc:"2.0",id:173,method:"tools/call",params:{name:"list_logs",arguments:{start_utc:"1970-01-01T00:00:00Z",end_utc:"2100-01-01T00:00:00Z",allow_large_window:true,limit:1,cursor:}}}')"
-    second_page_body="1000 997 998 999 1000curl -sS -X POST -H "Content-Type: application/json" -H "Authorization: Bearer " -d "" "/mcp")"
-    assert_contains "" '"structuredContent"' "list_logs second cursor page did not return structuredContent"
+  next_cursor="$(printf '%s' "$logs_page_body" | jq -r '.result.structuredContent.next_cursor // empty')"
+  if [[ -n "$next_cursor" ]]; then
+    second_page_payload="$(jq -cn --arg cursor "$next_cursor" '{jsonrpc:"2.0",id:173,method:"tools/call",params:{name:"list_logs",arguments:{start_utc:"1970-01-01T00:00:00Z",end_utc:"2100-01-01T00:00:00Z",allow_large_window:true,limit:1,cursor:$cursor}}}')"
+    second_page_body="$(curl -sS -X POST \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ${TOKEN}" \
+      -d "$second_page_payload" \
+      "${BASE_URL}/mcp")"
+    assert_contains "$second_page_body" '"structuredContent"' "list_logs second cursor page did not return structuredContent"
+  else
+    echo "[smoke] first journal page was exhausted; skipping second cursor page"
   fi
+else
+  echo "[smoke] jq not available; skipping second cursor page"
 fi
 
 echo "[smoke] PASS"
