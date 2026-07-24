@@ -30,15 +30,6 @@ pub struct ServicesQueryParams {
     pub summary: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ContainerStatusParams {
-    pub container: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct PodStatusParams {
-    pub pod: String,
-}
 
 #[derive(Debug, Deserialize)]
 pub struct LogsQueryParams {
