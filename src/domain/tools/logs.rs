@@ -481,7 +481,7 @@ pub async fn handle_list_logs(
                     serde_json::Map::from_iter([
                         ("summary".to_string(), json!(summary)),
                         ("total_scanned".to_string(), json!(log_result.total_scanned)),
-                        ("returned".to_string(), json!(returned)),
+("returned".to_string(), json!(log_result.entries.len())),
                         ("truncated".to_string(), json!(truncated)),
                         ("next_cursor".to_string(), json!(next_cursor)),
                         ("generated_at_utc".to_string(), json!(generated_at_utc)),
