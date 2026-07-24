@@ -7,13 +7,19 @@ cd "$ROOT_DIR"
 HOST="${SMOKE_HOST:-127.0.0.1}"
 PORT="${SMOKE_PORT:-8080}"
 TOKEN="${SMOKE_TOKEN:-change-me-token-16}"
+RATE_LIMIT_REQUESTS_PER_SECOND="${SMOKE_RATE_LIMIT_REQUESTS_PER_SECOND:-100}"
+RATE_LIMIT_BURST="${SMOKE_RATE_LIMIT_BURST:-20}"
 BINARY_PATH="${SMOKE_BINARY:-${ROOT_DIR}/target/release/systemd-monitoring-mcp}"
 BASE_URL="http://${HOST}:${PORT}"
 
 SERVER_LOG="$(mktemp -t systemd-monitoring-mcp-smoke.XXXXXX.log)"
 SERVER_PID=""
+RATE_RESULT_DIR=""
 
 cleanup() {
+  if [[ -n "$RATE_RESULT_DIR" && -d "$RATE_RESULT_DIR" ]]; then
+    rm -rf -- "$RATE_RESULT_DIR"
+  fi
   if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
@@ -163,10 +169,39 @@ check_binary_available
 check_systemd_available
 
 echo "[smoke] starting server binary ${BINARY_PATH} on ${HOST}:${PORT}"
-MCP_API_TOKEN="$TOKEN" BIND_ADDR="$HOST" BIND_PORT="$PORT" "$BINARY_PATH" >"$SERVER_LOG" 2>&1 &
+MCP_API_TOKEN="$TOKEN" BIND_ADDR="$HOST" BIND_PORT="$PORT" RATE_LIMIT_REQUESTS_PER_SECOND="$RATE_LIMIT_REQUESTS_PER_SECOND" RATE_LIMIT_BURST="$RATE_LIMIT_BURST" "$BINARY_PATH" >"$SERVER_LOG" 2>&1 &
 SERVER_PID="$!"
 
 wait_for_health || fail "server did not become healthy in time"
+
+echo "[smoke] checking global HTTP rate limiting"
+RATE_RESULT_DIR="$(mktemp -d -t systemd-monitoring-mcp-rate.XXXXXX)"
+for request_number in $(seq 1 60); do
+  (
+    curl -sS -D "${RATE_RESULT_DIR}/headers-${request_number}" \
+      -o "${RATE_RESULT_DIR}/body-${request_number}" \
+      -w "%{http_code}" "${BASE_URL}/health" \
+      >"${RATE_RESULT_DIR}/status-${request_number}"
+  ) &
+done
+wait
+
+rate_limit_observed="false"
+for status_file in "${RATE_RESULT_DIR}"/status-*; do
+  if [[ "$(<"$status_file")" == "429" ]]; then
+    request_number="${status_file##*-}"
+    rate_limit_body="$(<"${RATE_RESULT_DIR}/body-${request_number}")"
+    retry_after="$(sed -n "s/^[Rr]etry-[Aa]fter:[[:space:]]*\([^[:space:]\r]*\).*/\1/p" "${RATE_RESULT_DIR}/headers-${request_number}")"
+    [[ "$rate_limit_body" == "{\"code\":\"rate_limit_exceeded\",\"message\":\"rate limit exceeded\",\"details\":{}}" ]] || fail "rate-limit response body was not stable"
+    [[ "$retry_after" =~ ^[1-9][0-9]*$ ]] || fail "rate-limit response did not include a positive Retry-After"
+    rate_limit_observed="true"
+    break
+  fi
+done
+[[ "$rate_limit_observed" == "true" ]] || fail "rapid request loop did not observe HTTP 429"
+rm -rf -- "$RATE_RESULT_DIR"
+RATE_RESULT_DIR=""
+sleep 1
 
 echo "[smoke] checking GET /health"
 health_body="$(curl -sS "${BASE_URL}/health")"

@@ -27,3 +27,14 @@ Deployment-settle waiting, recursive dependency traversal, and Podman list/searc
 2. Sanitize credential-like argv flags, flag assignments, and environment-style assignments.
 3. Project health configuration onto sanitized test argv and non-secret scheduling fields only.
 4. Add regression tests proving raw secrets and excluded fields cannot appear in serialized responses.
+
+## Global HTTP Rate Limiting
+
+1. Extend validated environment configuration with requests-per-second and burst values, using defaults of 10 and 20 and rejecting zero, malformed, overflowing, or values above 1,000,000.
+2. Add a reusable, deterministic token bucket that starts full, refills continuously, caps at burst capacity, and computes a whole-second retry delay.
+3. Store one shared limiter in application state and layer it across the complete router inside request logging but before authentication and handlers.
+4. Return stable HTTP `429` errors with `Retry-After`, including for `/mcp`, without invoking downstream providers or JSON-RPC handling.
+5. Add configuration, bucket, router-sharing, independent-instance, smoke, logging, and regression coverage.
+6. Run formatting, Clippy with warnings denied, and the full test suite.
+
+Compatibility: no MCP capabilities, tools, resources, or response fields change. The new `429` is an HTTP admission response.

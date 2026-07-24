@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 use axum::{
     body::Body,
@@ -2025,4 +2028,208 @@ async fn mcp_tools_call_list_logs_since_last_start_rejects_invalid_scope() {
     let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
     assert_eq!(body_json["error"]["code"], -32602);
     assert_eq!(body_json["error"]["data"]["code"], "invalid_scope");
+}
+
+struct CountingProvider {
+    system_state_calls: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl UnitProvider for CountingProvider {
+    /// Counts status lookups so rejected requests can prove provider bypass.
+    async fn system_state(&self, _scope: UnitScope) -> Result<String, crate::errors::AppError> {
+        self.system_state_calls.fetch_add(1, Ordering::SeqCst);
+        Ok("running".to_string())
+    }
+
+    /// Returns no services because rate-limit routing tests do not inspect them.
+    async fn list_service_units(
+        &self,
+        _scope: UnitScope,
+    ) -> Result<Vec<UnitStatus>, crate::errors::AppError> {
+        Ok(Vec::new())
+    }
+
+    /// Returns no logs because rate-limit routing tests do not inspect them.
+    async fn list_journal_logs(
+        &self,
+        _query: &LogQuery,
+    ) -> Result<LogQueryResult, crate::errors::AppError> {
+        Ok(LogQueryResult {
+            entries: Vec::new(),
+            total_scanned: Some(0),
+            has_more: false,
+        })
+    }
+
+    /// Returns no timers because rate-limit routing tests do not inspect them.
+    async fn list_timer_units(
+        &self,
+        _scope: UnitScope,
+    ) -> Result<Vec<TimerStatus>, crate::errors::AppError> {
+        Ok(Vec::new())
+    }
+}
+
+/// Builds a test router with an explicit limiter policy and provider.
+fn app_with_rate_limit(
+    requests_per_second: u32,
+    burst: u32,
+    unit_provider: Arc<dyn UnitProvider>,
+) -> Router {
+    let policy = crate::rate_limit::RateLimitPolicy::new(requests_per_second, burst)
+        .expect("valid test rate-limit policy");
+    let state =
+        AppState::new_with_rate_limit("token-1234567890ab".to_string(), unit_provider, policy);
+    build_app(state)
+}
+
+/// Builds a request for a route that requires no request body.
+fn empty_request(path: &str) -> Request<Body> {
+    Request::builder()
+        .uri(path)
+        .body(Body::empty())
+        .expect("request build")
+}
+
+/// Verifies the default-sized burst admits exactly twenty immediate requests.
+#[tokio::test]
+async fn global_rate_limit_exhausts_burst_with_stable_http_error() {
+    let app = app_with_rate_limit(1, 20, Arc::new(MockProvider));
+
+    for _ in 0..20 {
+        let response = app
+            .clone()
+            .oneshot(empty_request("/health"))
+            .await
+            .expect("request execution");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let limited_mcp_request = Request::builder()
+        .uri("/mcp")
+        .method("POST")
+        .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#,
+        ))
+        .expect("rate-limited MCP request build");
+    let response = app
+        .oneshot(limited_mcp_request)
+        .await
+        .expect("request execution");
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    assert_eq!(
+        body,
+        r#"{"code":"rate_limit_exceeded","message":"rate limit exceeded","details":{}}"#
+    );
+}
+
+/// Verifies every route class consumes one budget before downstream work.
+#[tokio::test]
+async fn all_route_and_authentication_classes_share_budget() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = Arc::new(CountingProvider {
+        system_state_calls: Arc::clone(&calls),
+    });
+    let app = app_with_rate_limit(1, 5, provider);
+
+    let public = app
+        .clone()
+        .oneshot(empty_request("/health"))
+        .await
+        .expect("public request");
+    assert_eq!(public.status(), StatusCode::OK);
+
+    let unauthenticated = app
+        .clone()
+        .oneshot(empty_request("/systemd/system/status"))
+        .await
+        .expect("unauthenticated request");
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let invalid_request = Request::builder()
+        .uri("/systemd/system/status")
+        .header(header::AUTHORIZATION, "Bearer invalid-credential")
+        .body(Body::empty())
+        .expect("invalid-credential request build");
+    let invalid = app
+        .clone()
+        .oneshot(invalid_request)
+        .await
+        .expect("invalid-credential request");
+    assert_eq!(invalid.status(), StatusCode::UNAUTHORIZED);
+
+    let unmatched = app
+        .clone()
+        .oneshot(empty_request("/not-a-route"))
+        .await
+        .expect("unmatched request");
+    assert_eq!(unmatched.status(), StatusCode::NOT_FOUND);
+
+    let authenticated_request = Request::builder()
+        .uri("/systemd/system/status")
+        .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+        .body(Body::empty())
+        .expect("authenticated request build");
+    let authenticated = app
+        .clone()
+        .oneshot(authenticated_request)
+        .await
+        .expect("authenticated request");
+    assert_eq!(authenticated.status(), StatusCode::OK);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let rejected_request = Request::builder()
+        .uri("/systemd/system/status")
+        .header(header::AUTHORIZATION, "Bearer invalid-after-exhaustion")
+        .body(Body::empty())
+        .expect("rejected request build");
+    let rejected = app
+        .oneshot(rejected_request)
+        .await
+        .expect("rejected request");
+    assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+/// Verifies separately constructed applications never share limiter state.
+#[tokio::test]
+async fn fresh_application_instances_have_independent_buckets() {
+    let first = app_with_rate_limit(1, 1, Arc::new(MockProvider));
+    let second = app_with_rate_limit(1, 1, Arc::new(MockProvider));
+
+    assert_eq!(
+        first
+            .clone()
+            .oneshot(empty_request("/health"))
+            .await
+            .expect("first app request")
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        first
+            .oneshot(empty_request("/health"))
+            .await
+            .expect("first app rejection")
+            .status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    assert_eq!(
+        second
+            .oneshot(empty_request("/health"))
+            .await
+            .expect("second app request")
+            .status(),
+        StatusCode::OK
+    );
 }

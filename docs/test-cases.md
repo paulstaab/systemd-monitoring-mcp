@@ -2,6 +2,18 @@
 
 ## HTTP Transport and Security
 
+Global admission limiting:
+
+- Configuration defaults to 10 requests per second and burst 20; explicit valid values are retained.
+- Zero, malformed, overflowing, and above-maximum rate or burst values fail configuration parsing with field-specific errors.
+- A new bucket starts with its full burst, admits the first 20 immediate requests under defaults, and rejects the next request.
+- Refill is continuous, reaches admission at the correct fractional interval, never exceeds burst, and computes `Retry-After` rounded up to at least one second without wall-clock sleeps.
+- Public, authenticated, unauthenticated, invalid-credential, and unmatched requests consume one shared budget across router clones.
+- A rejected `/mcp` or protected request returns HTTP `429` with exact standard JSON body and `Retry-After`, and invokes no authentication, JSON-RPC, systemd, journal, or Podman provider work.
+- Request-summary logging observes `429` responses without recording authorization headers or token values.
+- Separately constructed application states have independent buckets.
+- Existing authentication and HTTP/JSON-RPC error behavior remains unchanged while tokens are available.
+
 Case 1 — network access without a valid token:
 
 - `GET /health` returns `200` with `{ "status": "ok" }` and no sensitive fields.
