@@ -20,3 +20,10 @@ Existing tools and resources retain their names and response fields. Additive se
 ## Deferred
 
 Deployment-settle waiting, recursive dependency traversal, and Podman list/search operations remain backlog items.
+
+## Security Hardening: Podman Response Minimization
+
+1. Remove raw create commands and host mount sources from the public DTO.
+2. Sanitize credential-like argv flags, flag assignments, and environment-style assignments.
+3. Project health configuration onto sanitized test argv and non-secret scheduling fields only.
+4. Add regression tests proving raw secrets and excluded fields cannot appear in serialized responses.

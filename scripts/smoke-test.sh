@@ -40,6 +40,15 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local message="$3"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    fail "$message"
+  fi
+}
+
 assert_systemd_status_response() {
   local scope="$1"
   local status_code="$2"
@@ -528,6 +537,8 @@ if command -v podman >/dev/null 2>&1; then
       -d "{\"jsonrpc\":\"2.0\",\"id\":171,\"method\":\"tools/call\",\"params\":{\"name\":\"get_container_status\",\"arguments\":{\"container\":\"${container_fixture}\"}}}" \
       "${BASE_URL}/mcp")"
     assert_contains "$container_body" '"structuredContent"' "get_container_status did not return structuredContent"
+    assert_not_contains "$container_body" '"create_command"' "get_container_status exposed create_command"
+    assert_not_contains "$container_body" '"source"' "get_container_status exposed a host mount source"
   fi
 fi
 

@@ -72,7 +72,7 @@ pub struct GetUnitStatusTool {
 
 #[macros::mcp_tool(
     name = "get_container_status",
-    description = "Inspect one local Podman container using a read-only bounded CLI call."
+    description = "Inspect one local Podman container using a read-only bounded CLI call. Commands and health checks are credential-redacted; raw create commands and host mount sources are omitted."
 )]
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct GetContainerStatusTool {

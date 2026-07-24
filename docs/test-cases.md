@@ -143,3 +143,11 @@
 - Log pagination covers ascending/descending exclusive continuation without gaps or duplicates, exhausted/invalid cursors, filter continuity, all projections, invalid/duplicate fields, grouping counts/order and raw-page continuation.
 - Log bounds cover literal versus slash-delimited regex grep, unit-start derivation/unavailability, exact seven-day acceptance, and `maximum_start_utc` error details.
 - `tools/list` advertises strict schemas for `get_unit_status`, `get_container_status`, and `get_pod_status`; successful calls use `structuredContent` and failures preserve stable JSON-RPC shapes.
+
+## Podman Inspection Data Minimization
+
+- Container output omits `create_command` even when Podman inspect returns `CreateCommand` containing secrets.
+- Mount output omits host `Source` while retaining destination, type, and read-only state.
+- Command and health-test argv redact case-insensitive credential values supplied as separate arguments, `--flag=value`, and `NAME=value` assignments.
+- Non-sensitive argv ordering and values remain intact.
+- Health configuration exposes only sanitized test argv and timing/retry fields and never health logs or unrelated raw metadata.

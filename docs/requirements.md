@@ -306,3 +306,11 @@ Sensitive data handling:
 - Plain `grep` remains case-sensitive literal matching. Slash-delimited values are Rust regular expressions, including alternation such as `/ERROR|fatal/`.
 - `group_by=message` groups identical `(unit, priority, message)` values within the fetched raw page and adds `count`, `first_timestamp_utc`, and `last_timestamp_utc`; continuation advances over raw rows.
 - The seven-day window is inclusive. Oversized-window errors include `maximum_start_utc = end_utc - 7 days` in structured details.
+
+### 7.4 Podman Inspection Data Minimization
+
+- Container inspection must not return Podman `CreateCommand`, host mount source paths, environment data, labels, annotations, health logs, or other raw inspect configuration.
+- `command` remains argv-shaped when Podman provides an array, but values associated with credential-like flags or assignments must be replaced with `[REDACTED]`.
+- `health_config` may contain only sanitized `test` argv and non-secret timing/retry fields: `interval`, `timeout`, `start_period`, `start_interval`, and `retries`.
+- Credential detection is case-insensitive and covers password, secret, token, credential, authorization, bearer, API-key, and API-key spelling variants in `--name value`, `--name=value`, and `NAME=value` forms.
+- Mount entries may contain type, container destination, and read-only state only.
