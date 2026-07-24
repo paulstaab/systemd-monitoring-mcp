@@ -30,7 +30,6 @@ pub struct ServicesQueryParams {
     pub summary: Option<bool>,
 }
 
-
 #[derive(Debug, Deserialize)]
 pub struct LogsQueryParams {
     pub scope: Option<String>,
