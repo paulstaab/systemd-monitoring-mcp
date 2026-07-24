@@ -177,7 +177,7 @@ impl IntoResponse for AppError {
                 "rate_limit_exceeded",
                 "rate limit exceeded".to_string(),
                 json!({}),
-                Some(retry_after_seconds),
+                Some(retry_after_seconds.max(1)),
             ),
         };
 
