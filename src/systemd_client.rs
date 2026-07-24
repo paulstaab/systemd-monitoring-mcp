@@ -35,7 +35,7 @@ impl Serialize for UnitStatus {
     /// Serializes compatibility service fields plus additive restart/timestamp metadata.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(14))?;
+        let mut map = serializer.serialize_map(Some(13))?;
         map.serialize_entry("unit", &self.unit)?;
         map.serialize_entry("scope", &self.scope)?;
         map.serialize_entry("description", &self.description)?;
