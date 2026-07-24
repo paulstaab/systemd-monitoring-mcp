@@ -16,7 +16,7 @@ use zbus::{zvariant::OwnedObjectPath, Connection, Proxy};
 
 use crate::errors::AppError;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnitStatus {
     pub unit: String,
     pub scope: String,
@@ -31,6 +31,34 @@ pub struct UnitStatus {
     pub result: Option<String>,
 }
 
+impl Serialize for UnitStatus {
+    /// Serializes compatibility service fields plus additive restart/timestamp metadata.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(13))?;
+        map.serialize_entry("unit", &self.unit)?;
+        map.serialize_entry("scope", &self.scope)?;
+        map.serialize_entry("description", &self.description)?;
+        map.serialize_entry("load_state", &self.load_state)?;
+        map.serialize_entry("active_state", &self.active_state)?;
+        map.serialize_entry("sub_state", &self.sub_state)?;
+        map.serialize_entry("unit_file_state", &self.unit_file_state)?;
+        map.serialize_entry("since_utc", &self.since_utc)?;
+        map.serialize_entry("main_pid", &self.main_pid)?;
+        map.serialize_entry("exec_main_status", &self.exec_main_status)?;
+        map.serialize_entry("result", &self.result)?;
+        map.serialize_entry("restart_count", &Option::<u32>::None)?;
+        map.serialize_entry(
+            "timestamps",
+            &serde_json::json!({
+                "state_change": null, "active_enter": self.since_utc,
+                "active_exit": null, "inactive_enter": null, "inactive_exit": null,
+                "main_process_start": null, "main_process_exit": null
+            }),
+        )?;
+        map.end()
+    }
+}
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TimerStatus {
     pub unit: String,
@@ -46,6 +74,34 @@ pub struct TimerStatus {
     pub result: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct FailedDependency {
+    unit: String,
+    relationship: String,
+    load_state: String,
+    active_state: String,
+    sub_state: String,
+    result: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct UnitTransition {
+    timestamp_utc: String,
+    kind: String,
+    message: Option<String>,
+    cursor: Option<String>,
+}
+
+const MAX_TRANSITION_SCAN: usize = 10_000;
+const UNIT_TRANSITION_MESSAGE_IDS: [(&str, &str); 7] = [
+    ("7d4958e842da4a758f6c1cdc7b36dcc5", "starting"),
+    ("39f53479d3a045ac8e11786248231fbf", "started"),
+    ("de5b426a63be47a7b6ac3eaac82e2f6f", "stopping"),
+    ("9d1aaa27d60140bd96365438aad20286", "stopped"),
+    ("be02cf6855d2428ba40df7e9d022f03d", "failed"),
+    ("d34d037fff1847e6ae669a370e694725", "reloading"),
+    ("7b05ebc668384222baa8881179cfda54", "reloaded"),
+];
 #[derive(Debug, Clone)]
 pub struct LogQuery {
     pub scope: UnitScope,
@@ -57,6 +113,7 @@ pub struct LogQuery {
     pub start_utc: Option<DateTime<Utc>>,
     pub end_utc: Option<DateTime<Utc>>,
     pub limit: usize,
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,6 +257,28 @@ pub trait UnitProvider: Send + Sync {
     async fn system_state(&self, scope: UnitScope) -> Result<String, AppError>;
     /// Lists systemd `*.service` units for the requested manager scope.
     async fn list_service_units(&self, scope: UnitScope) -> Result<Vec<UnitStatus>, AppError>;
+    /// Inspects one service; adapters may override to add dependency and transition detail.
+    async fn get_unit_status(
+        &self,
+        unit: &str,
+        scope: UnitScope,
+        _transition_limit: usize,
+    ) -> Result<serde_json::Value, AppError> {
+        let row = self
+            .list_service_units(scope)
+            .await?
+            .into_iter()
+            .find(|row| row.unit == unit)
+            .ok_or_else(|| {
+                AppError::bad_request("unit_not_found", "systemd service unit was not found")
+            })?;
+        let mut value = serde_json::to_value(row).expect("unit status serialization");
+        if let Some(object) = value.as_object_mut() {
+            object.insert("failed_dependencies".to_string(), serde_json::json!([]));
+            object.insert("recent_transitions".to_string(), serde_json::json!([]));
+        }
+        Ok(value)
+    }
     /// Lists systemd timer units with scheduling/trigger metadata when available.
     ///
     /// Implementations should prefer returning partial records with nullable fields
@@ -207,6 +286,20 @@ pub trait UnitProvider: Send + Sync {
     async fn list_timer_units(&self, scope: UnitScope) -> Result<Vec<TimerStatus>, AppError>;
     /// Lists journald log entries that satisfy the provided query constraints.
     async fn list_journal_logs(&self, query: &LogQuery) -> Result<LogQueryResult, AppError>;
+    /// Returns the most recent main-process start for a service when available.
+    async fn unit_main_start(
+        &self,
+        unit: &str,
+        scope: UnitScope,
+    ) -> Result<Option<DateTime<Utc>>, AppError> {
+        let rows = self.list_service_units(scope).await?;
+        Ok(rows
+            .into_iter()
+            .find(|row| row.unit == unit)
+            .and_then(|row| row.since_utc)
+            .and_then(|value| DateTime::parse_from_rfc3339(&value).ok())
+            .map(|value| value.with_timezone(&Utc)))
+    }
 }
 
 #[derive(Debug, Default)]
@@ -503,6 +596,84 @@ impl UnitProvider for DbusSystemdClient {
         }
     }
 
+    /// Inspects one service with direct dependency failures and bounded transition history.
+    ///
+    /// Base service properties remain independently best-effort through the list enrichment
+    /// path. Dependency and transition failures are logged and degrade to empty collections
+    /// without discarding the successfully resolved unit state.
+    async fn get_unit_status(
+        &self,
+        unit: &str,
+        scope: UnitScope,
+        transition_limit: usize,
+    ) -> Result<serde_json::Value, AppError> {
+        if scope == UnitScope::Both {
+            return Err(AppError::bad_request(
+                "invalid_scope",
+                "unit inspection requires system or user scope",
+            ));
+        }
+        let row = self
+            .list_service_units_for_single_scope(scope)
+            .await?
+            .into_iter()
+            .find(|row| row.unit == unit)
+            .ok_or_else(|| {
+                AppError::bad_request("unit_not_found", "systemd service unit was not found")
+            })?;
+        let connection = dbus_connection_for_scope(scope).await?;
+        let manager = Proxy::new(
+            &connection,
+            "org.freedesktop.systemd1",
+            "/org/freedesktop/systemd1",
+            "org.freedesktop.systemd1.Manager",
+        )
+        .await
+        .map_err(|err| AppError::internal(format!("failed to create unit lookup proxy: {err}")))?;
+        let unit_path: OwnedObjectPath = manager.call("GetUnit", &(unit,)).await.map_err(|_| {
+            AppError::bad_request("unit_not_found", "systemd service unit was not found")
+        })?;
+
+        let failed_dependencies = match read_failed_dependencies(&connection, &unit_path, scope)
+            .await
+        {
+            Ok(dependencies) => dependencies,
+            Err(err) => {
+                warn!(unit = %unit, scope = %scope.as_str(), error = %err, "failed to inspect direct unit dependencies");
+                Vec::new()
+            }
+        };
+        let transition_unit = unit.to_string();
+        let recent_transitions = match tokio::task::spawn_blocking(move || {
+            read_unit_transitions(&transition_unit, scope, transition_limit)
+        })
+        .await
+        {
+            Ok(Ok(transitions)) => transitions,
+            Ok(Err(err)) => {
+                warn!(unit = %unit, scope = %scope.as_str(), error = %err, "failed to inspect unit transitions");
+                Vec::new()
+            }
+            Err(err) => {
+                warn!(unit = %unit, scope = %scope.as_str(), error = %err, "transition reader task failed");
+                Vec::new()
+            }
+        };
+
+        let mut value = serde_json::to_value(row).expect("unit status serialization");
+        let object = value
+            .as_object_mut()
+            .expect("unit status must serialize as an object");
+        object.insert(
+            "failed_dependencies".to_string(),
+            serde_json::json!(failed_dependencies),
+        );
+        object.insert(
+            "recent_transitions".to_string(),
+            serde_json::json!(recent_transitions),
+        );
+        Ok(value)
+    }
     /// Executes journald scanning in a blocking worker to avoid async runtime stalls.
     async fn list_journal_logs(&self, query: &LogQuery) -> Result<LogQueryResult, AppError> {
         let query = query.clone();
@@ -1089,29 +1260,37 @@ fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
         ));
     };
 
-    match query.order {
-        LogOrder::Desc => {
-            let end_unix_usec = end_utc.timestamp_micros();
-            if let Ok(end_unix_usec) = u64::try_from(end_unix_usec) {
-                reader.seek_realtime_usec(end_unix_usec).map_err(|err| {
-                    AppError::internal(format!("failed to seek journald end timestamp: {err}"))
-                })?;
-            } else {
-                reader.seek_tail().map_err(|err| {
-                    AppError::internal(format!("failed to seek journald tail: {err}"))
-                })?;
+    if let Some(cursor) = query.cursor.as_deref() {
+        reader.seek_cursor(cursor).map_err(|_| {
+            AppError::bad_request("invalid_cursor", "journal cursor is invalid or expired")
+        })?;
+    } else {
+        match query.order {
+            LogOrder::Desc => {
+                let end_unix_usec = end_utc.timestamp_micros();
+                if let Ok(end_unix_usec) = u64::try_from(end_unix_usec) {
+                    reader.seek_realtime_usec(end_unix_usec).map_err(|err| {
+                        AppError::internal(format!("failed to seek journald end timestamp: {err}"))
+                    })?;
+                } else {
+                    reader.seek_tail().map_err(|err| {
+                        AppError::internal(format!("failed to seek journald tail: {err}"))
+                    })?;
+                }
             }
-        }
-        LogOrder::Asc => {
-            let start_unix_usec = start_utc.timestamp_micros();
-            if let Ok(start_unix_usec) = u64::try_from(start_unix_usec) {
-                reader.seek_realtime_usec(start_unix_usec).map_err(|err| {
-                    AppError::internal(format!("failed to seek journald start timestamp: {err}"))
-                })?;
-            } else {
-                reader.seek_head().map_err(|err| {
-                    AppError::internal(format!("failed to seek journald head: {err}"))
-                })?;
+            LogOrder::Asc => {
+                let start_unix_usec = start_utc.timestamp_micros();
+                if let Ok(start_unix_usec) = u64::try_from(start_unix_usec) {
+                    reader.seek_realtime_usec(start_unix_usec).map_err(|err| {
+                        AppError::internal(format!(
+                            "failed to seek journald start timestamp: {err}"
+                        ))
+                    })?;
+                } else {
+                    reader.seek_head().map_err(|err| {
+                        AppError::internal(format!("failed to seek journald head: {err}"))
+                    })?;
+                }
             }
         }
     }
@@ -1236,6 +1415,180 @@ fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
     })
 }
 
+/// Returns a stable transition kind for a canonical systemd journal message ID.
+fn transition_kind(message_id: &str) -> Option<&'static str> {
+    UNIT_TRANSITION_MESSAGE_IDS
+        .iter()
+        .find_map(|(candidate, kind)| (*candidate == message_id).then_some(*kind))
+}
+
+/// Classifies direct Requires/Wants rows that are failed, missing, or unloaded.
+fn classify_failed_dependencies(
+    requires: Vec<String>,
+    wants: Vec<String>,
+    rows: &[RawUnit],
+) -> Vec<FailedDependency> {
+    let by_name = rows
+        .iter()
+        .map(|row| (row.name.as_str(), row))
+        .collect::<HashMap<_, _>>();
+    let mut output = Vec::new();
+    for (relationship, dependencies) in [("requires", requires), ("wants", wants)] {
+        for name in dependencies {
+            let dependency = by_name.get(name.as_str()).copied();
+            let failed = dependency
+                .map(|row| {
+                    row.active_state.eq_ignore_ascii_case("failed")
+                        || !row.load_state.eq_ignore_ascii_case("loaded")
+                })
+                .unwrap_or(true);
+            if failed {
+                output.push(FailedDependency {
+                    unit: name,
+                    relationship: relationship.to_string(),
+                    load_state: dependency
+                        .map(|row| row.load_state.clone())
+                        .unwrap_or_else(|| "not-found".to_string()),
+                    active_state: dependency
+                        .map(|row| row.active_state.clone())
+                        .unwrap_or_else(|| "inactive".to_string()),
+                    sub_state: dependency
+                        .map(|row| row.sub_state.clone())
+                        .unwrap_or_else(|| "dead".to_string()),
+                    result: None,
+                });
+            }
+        }
+    }
+    output.sort_by(|left, right| {
+        left.unit
+            .cmp(&right.unit)
+            .then_with(|| left.relationship.cmp(&right.relationship))
+    });
+    output
+        .dedup_by(|left, right| left.unit == right.unit && left.relationship == right.relationship);
+    output
+}
+
+/// Reads direct dependency properties and current rows for one concrete unit.
+async fn read_failed_dependencies(
+    connection: &Connection,
+    unit_path: &OwnedObjectPath,
+    scope: UnitScope,
+) -> Result<Vec<FailedDependency>, AppError> {
+    let proxy = Proxy::new(
+        connection,
+        "org.freedesktop.systemd1",
+        unit_path,
+        "org.freedesktop.systemd1.Unit",
+    )
+    .await
+    .map_err(|err| AppError::internal(format!("failed to create unit dependency proxy: {err}")))?;
+    let requires = proxy
+        .get_property::<Vec<String>>("Requires")
+        .await
+        .unwrap_or_default();
+    let wants = proxy
+        .get_property::<Vec<String>>("Wants")
+        .await
+        .unwrap_or_default();
+    let rows = list_units_rows(connection, scope)
+        .await?
+        .into_iter()
+        .map(
+            |(name, description, load_state, active_state, sub_state, _, unit_path, _, _, _)| {
+                RawUnit {
+                    name,
+                    description,
+                    load_state,
+                    active_state,
+                    sub_state,
+                    unit_path,
+                }
+            },
+        )
+        .collect::<Vec<_>>();
+    let mut dependencies = classify_failed_dependencies(requires, wants, &rows);
+    for dependency in &mut dependencies {
+        if dependency.unit.ends_with(".service") {
+            if let Some(row) = rows.iter().find(|row| row.name == dependency.unit) {
+                dependency.result = fetch_service_details(connection, &row.unit_path)
+                    .await
+                    .ok()
+                    .and_then(|details| details.result);
+            }
+        }
+    }
+    Ok(dependencies)
+}
+
+/// Reads canonical systemd transition entries newest-first with a hard scan bound.
+fn read_unit_transitions(
+    unit: &str,
+    scope: UnitScope,
+    limit: usize,
+) -> Result<Vec<UnitTransition>, AppError> {
+    let mut options = journal::OpenOptions::default();
+    match scope {
+        UnitScope::System => {
+            options.system(true);
+        }
+        UnitScope::User => {
+            options.current_user(true);
+        }
+        UnitScope::Both => {
+            return Err(AppError::bad_request(
+                "invalid_scope",
+                "transition lookup requires a concrete scope",
+            ))
+        }
+    }
+    let mut reader = options
+        .open()
+        .map_err(|err| AppError::internal(format!("failed to open transition journal: {err}")))?;
+    reader.seek_tail().map_err(|err| {
+        AppError::internal(format!("failed to seek transition journal tail: {err}"))
+    })?;
+    let mut transitions = Vec::new();
+    for _ in 0..MAX_TRANSITION_SCAN {
+        if transitions.len() >= limit {
+            break;
+        }
+        if reader.previous().map_err(|err| {
+            AppError::internal(format!("failed to read transition journal: {err}"))
+        })? == 0
+        {
+            break;
+        }
+        let Some(message_id) = read_journal_field(&mut reader, "MESSAGE_ID")? else {
+            continue;
+        };
+        let Some(kind) = transition_kind(&message_id) else {
+            continue;
+        };
+        let entry_unit = read_journal_field(&mut reader, "UNIT")?
+            .or(read_journal_field(&mut reader, "USER_UNIT")?);
+        if entry_unit.as_deref() != Some(unit) {
+            continue;
+        }
+        let timestamp_usec = reader.timestamp_usec().map_err(|err| {
+            AppError::internal(format!("failed to read transition timestamp: {err}"))
+        })?;
+        let Some(timestamp) = i64::try_from(timestamp_usec)
+            .ok()
+            .and_then(DateTime::<Utc>::from_timestamp_micros)
+        else {
+            continue;
+        };
+        transitions.push(UnitTransition {
+            timestamp_utc: timestamp.to_rfc3339_opts(SecondsFormat::Millis, true),
+            kind: kind.to_string(),
+            message: sanitize_log_message(read_journal_field(&mut reader, "MESSAGE")?),
+            cursor: reader.cursor().ok(),
+        });
+    }
+    Ok(transitions)
+}
 /// Selects the output unit field according to the requested journal scope.
 fn select_unit_for_scope(
     scope: UnitScope,
@@ -1277,8 +1630,8 @@ fn read_journal_field(
 #[cfg(test)]
 mod tests {
     use super::{
-        combine_scope_rows_by_key, map_and_sort_service_units, map_and_sort_timer_units,
-        JournalLogEntry, RawUnit, UnitScope, UnitStatus,
+        classify_failed_dependencies, combine_scope_rows_by_key, map_and_sort_service_units,
+        map_and_sort_timer_units, transition_kind, JournalLogEntry, RawUnit, UnitScope, UnitStatus,
     };
     use crate::errors::AppError;
     use zbus::zvariant::OwnedObjectPath;
@@ -1476,5 +1829,72 @@ mod tests {
         assert_eq!(combined.len(), 2);
         assert_eq!(combined[0].scope, "system");
         assert_eq!(combined[1].scope, "user");
+    }
+
+    #[test]
+    fn maps_all_canonical_unit_transition_message_ids() {
+        let expected = [
+            ("7d4958e842da4a758f6c1cdc7b36dcc5", "starting"),
+            ("39f53479d3a045ac8e11786248231fbf", "started"),
+            ("de5b426a63be47a7b6ac3eaac82e2f6f", "stopping"),
+            ("9d1aaa27d60140bd96365438aad20286", "stopped"),
+            ("be02cf6855d2428ba40df7e9d022f03d", "failed"),
+            ("d34d037fff1847e6ae669a370e694725", "reloading"),
+            ("7b05ebc668384222baa8881179cfda54", "reloaded"),
+        ];
+        for (message_id, kind) in expected {
+            assert_eq!(transition_kind(message_id), Some(kind));
+        }
+        assert_eq!(transition_kind("00000000000000000000000000000000"), None);
+    }
+
+    #[test]
+    fn classifies_only_direct_failed_missing_and_unloaded_dependencies() {
+        let row = |name: &str, load_state: &str, active_state: &str| RawUnit {
+            name: name.to_string(),
+            description: String::new(),
+            load_state: load_state.to_string(),
+            active_state: active_state.to_string(),
+            sub_state: if active_state == "failed" {
+                "failed"
+            } else {
+                "running"
+            }
+            .to_string(),
+            unit_path: OwnedObjectPath::try_from(format!(
+                "/org/freedesktop/systemd1/unit/{}",
+                name.replace(['.', '-'], "_")
+            ))
+            .expect("valid test object path"),
+        };
+        let rows = vec![
+            row("healthy.service", "loaded", "active"),
+            row("failed.service", "loaded", "failed"),
+            row("unloaded.target", "not-found", "inactive"),
+        ];
+
+        let dependencies = classify_failed_dependencies(
+            vec![
+                "healthy.service".to_string(),
+                "failed.service".to_string(),
+                "missing.service".to_string(),
+            ],
+            vec!["unloaded.target".to_string()],
+            &rows,
+        );
+
+        assert_eq!(dependencies.len(), 3);
+        assert!(dependencies
+            .iter()
+            .any(|item| item.unit == "failed.service" && item.relationship == "requires"));
+        assert!(dependencies
+            .iter()
+            .any(|item| item.unit == "missing.service" && item.load_state == "not-found"));
+        assert!(dependencies
+            .iter()
+            .any(|item| item.unit == "unloaded.target" && item.relationship == "wants"));
+        assert!(!dependencies
+            .iter()
+            .any(|item| item.unit == "healthy.service"));
     }
 }

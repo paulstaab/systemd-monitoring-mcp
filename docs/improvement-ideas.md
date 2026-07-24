@@ -19,6 +19,10 @@ Use it as a lightweight planning backlog, not as a replacement for issue trackin
 
 ## Code Structure
 
+- Consider recursive dependency graph inspection with cycle detection and strict depth/size bounds; keep `get_unit_status` direct-only.
+
+- Add a bounded deployment-settle workflow after the read-only status and transition APIs prove stable.
+
 ## Maintainability
 
 ## Performance
@@ -30,3 +34,5 @@ Use it as a lightweight planning backlog, not as a replacement for issue trackin
 ## Developer & Agent Experience
 
 ## Packaging and Deployment
+
+- Consider Podman container/pod list and search tools after identifier-based inspection usage is established.

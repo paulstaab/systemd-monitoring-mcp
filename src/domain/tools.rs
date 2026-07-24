@@ -3,8 +3,10 @@
 //! Provides MCP tool catalog and dispatch for service, timer, and log monitoring.
 
 mod logs;
+mod podman;
 mod services;
 mod timers;
+mod unit_status;
 
 use rust_mcp_sdk::{
     macros,
@@ -41,6 +43,39 @@ pub struct LogsQueryParams {
     pub allow_large_window: Option<bool>,
     pub limit: Option<u32>,
     pub summary: Option<bool>,
+    pub cursor: Option<String>,
+    pub fields: Option<Vec<String>>,
+    pub group_by: Option<String>,
+    pub since_last_start: Option<bool>,
+}
+
+#[macros::mcp_tool(
+    name = "get_unit_status",
+    description = "Inspect one systemd service with direct dependency failures and recent transitions."
+)]
+#[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
+pub struct GetUnitStatusTool {
+    pub unit: String,
+    pub scope: Option<String>,
+    pub transition_limit: Option<u32>,
+}
+
+#[macros::mcp_tool(
+    name = "get_container_status",
+    description = "Inspect one local Podman container using a read-only bounded CLI call. Commands and health checks are credential-redacted; raw create commands and host mount sources are omitted."
+)]
+#[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
+pub struct GetContainerStatusTool {
+    pub container: String,
+}
+
+#[macros::mcp_tool(
+    name = "get_pod_status",
+    description = "Inspect one local Podman pod using a read-only bounded CLI call."
+)]
+#[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
+pub struct GetPodStatusTool {
+    pub pod: String,
 }
 
 #[macros::mcp_tool(
@@ -82,6 +117,10 @@ pub struct ListLogsTool {
     pub allow_large_window: Option<bool>,
     pub limit: Option<u32>,
     pub summary: Option<bool>,
+    pub cursor: Option<String>,
+    pub fields: Option<Vec<String>>,
+    pub group_by: Option<String>,
+    pub since_last_start: Option<bool>,
 }
 
 #[macros::mcp_tool(
@@ -114,6 +153,9 @@ pub fn build_tools_list() -> Vec<Tool> {
         ListServicesTool::tool(),
         ListTimersTool::tool(),
         ListLogsTool::tool(),
+        GetUnitStatusTool::tool(),
+        GetContainerStatusTool::tool(),
+        GetPodStatusTool::tool(),
     ]
 }
 
@@ -137,6 +179,9 @@ pub async fn handle_tools_call(
 
     match tool_call.name.as_str() {
         "list_services" => services::handle_list_services(state, id, tool_call.arguments).await,
+        "get_unit_status" => unit_status::handle(state, id, tool_call.arguments).await,
+        "get_container_status" => podman::handle_container(state, id, tool_call.arguments).await,
+        "get_pod_status" => podman::handle_pod(state, id, tool_call.arguments).await,
         "list_timers" => timers::handle_list_timers(state, id, tool_call.arguments).await,
         "list_logs" => logs::handle_list_logs(state, id, tool_call.arguments).await,
         _ => json_rpc_method_not_found_with_data(
@@ -174,6 +219,10 @@ mod tests {
             allow_large_window: None,
             limit: Some((MAX_LOG_LIMIT + 1) as u32),
             summary: None,
+            cursor: None,
+            fields: None,
+            group_by: None,
+            since_last_start: None,
         });
 
         let error = query.expect_err("expected invalid limit");
@@ -194,6 +243,10 @@ mod tests {
             allow_large_window: None,
             limit: Some(10),
             summary: None,
+            cursor: None,
+            fields: None,
+            group_by: None,
+            since_last_start: None,
         });
 
         let error = query.expect_err("expected invalid utc time");
@@ -214,6 +267,10 @@ mod tests {
             allow_large_window: None,
             limit: Some(10),
             summary: None,
+            cursor: None,
+            fields: None,
+            group_by: None,
+            since_last_start: None,
         })
         .expect("query should build");
 
@@ -235,6 +292,10 @@ mod tests {
             allow_large_window: None,
             limit: Some(10),
             summary: None,
+            cursor: None,
+            fields: None,
+            group_by: None,
+            since_last_start: None,
         });
 
         let error = query.expect_err("expected invalid unit");
@@ -255,6 +316,10 @@ mod tests {
             allow_large_window: None,
             limit: Some(10),
             summary: None,
+            cursor: None,
+            fields: None,
+            group_by: None,
+            since_last_start: None,
         });
 
         let error = query.expect_err("expected missing time range");
@@ -275,6 +340,10 @@ mod tests {
             allow_large_window: None,
             limit: Some(10),
             summary: None,
+            cursor: None,
+            fields: None,
+            group_by: None,
+            since_last_start: None,
         });
 
         let error = query.expect_err("expected too large range");

@@ -29,6 +29,16 @@ pub fn app_error_to_json_rpc(id: Option<Value>, err: AppError) -> Value {
                 "details": {}
             })),
         ),
+        AppError::BadRequestWithDetails {
+            code,
+            message,
+            details,
+        } => json_rpc_error_with_data(
+            id,
+            -32602,
+            "Invalid params",
+            Some(json!({"code": code, "message": message, "details": details})),
+        ),
         AppError::Unauthorized { code, message } | AppError::Forbidden { code, message } => {
             json_rpc_error_with_data(
                 id,

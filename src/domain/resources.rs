@@ -116,6 +116,7 @@ pub async fn handle_resources_read(
                 start_utc: Some(start_utc),
                 end_utc: Some(end_utc),
                 limit: DEFAULT_LOG_LIMIT,
+                cursor: None,
             };
 
             match state.unit_provider.list_journal_logs(&query).await {

@@ -1997,3 +1997,32 @@ async fn mcp_parse_error_for_invalid_json() {
 
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn mcp_tools_call_list_logs_since_last_start_rejects_invalid_scope() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/mcp")
+                .method("POST")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                .body(Body::from(
+                    r#"{"jsonrpc":"2.0","id":399,"method":"tools/call","params":{"name":"list_logs","arguments":{"scope":"global","unit":"a.service","since_last_start":true,"end_utc":"2026-02-27T01:00:00Z"}}}"#,
+                ))
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+    assert_eq!(body_json["error"]["code"], -32602);
+    assert_eq!(body_json["error"]["data"]["code"], "invalid_scope");
+}

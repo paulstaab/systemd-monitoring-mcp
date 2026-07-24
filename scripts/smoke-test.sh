@@ -40,6 +40,15 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local message="$3"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    fail "$message"
+  fi
+}
+
 assert_systemd_status_response() {
   local scope="$1"
   local status_code="$2"
@@ -216,6 +225,9 @@ tools_list_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
 assert_contains "$tools_list_body" '"list_services"' "tools/list did not include list_services"
 assert_contains "$tools_list_body" '"list_timers"' "tools/list did not include list_timers"
 assert_contains "$tools_list_body" '"list_logs"' "tools/list did not include list_logs"
+assert_contains "$tools_list_body" '"get_unit_status"' "tools/list did not include get_unit_status"
+assert_contains "$tools_list_body" '"get_container_status"' "tools/list did not include get_container_status"
+assert_contains "$tools_list_body" '"get_pod_status"' "tools/list did not include get_pod_status"
 assert_contains "$tools_list_body" 'state accepts active' "tools/list list_services guidance did not mention valid states"
 assert_contains "$tools_list_body" 'sort accepts next, last, name, or state' "tools/list list_timers guidance did not mention valid sort values"
 assert_contains "$tools_list_body" 'order accepts asc or desc' "tools/list list_timers guidance did not mention valid order values"
@@ -504,5 +516,57 @@ assert_contains "$list_logs_summary_body" '"top_messages"' "tools/call list_logs
 assert_contains "$list_logs_summary_body" '"total_scanned"' "tools/call list_logs summary missing total_scanned metadata"
 assert_contains "$list_logs_summary_body" '"returned"' "tools/call list_logs summary missing returned metadata"
 assert_contains "$list_logs_summary_body" '"truncated"' "tools/call list_logs summary missing truncated metadata"
+
+echo "[smoke] checking detailed unit status when a service row is available"
+unit_fixture="$(printf '%s' "$list_services_body" | sed -n 's/.*"unit":"\([^"]*\.service\)".*/\1/p' | head -n 1)"
+if [[ -n "$unit_fixture" ]]; then
+  unit_status_body="$(curl -sS -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":170,\"method\":\"tools/call\",\"params\":{\"name\":\"get_unit_status\",\"arguments\":{\"unit\":\"${unit_fixture}\"}}}" \
+    "${BASE_URL}/mcp")"
+  assert_contains "$unit_status_body" '"structuredContent"' "get_unit_status did not return structuredContent"
+  assert_contains "$unit_status_body" '"failed_dependencies"' "get_unit_status did not include failed_dependencies"
+  assert_contains "$unit_status_body" '"recent_transitions"' "get_unit_status did not include recent_transitions"
+fi
+
+if command -v podman >/dev/null 2>&1; then
+  container_fixture="$(podman ps -aq --no-trunc 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$container_fixture" ]]; then
+    container_body="$(curl -sS -X POST \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ${TOKEN}" \
+      -d "{\"jsonrpc\":\"2.0\",\"id\":171,\"method\":\"tools/call\",\"params\":{\"name\":\"get_container_status\",\"arguments\":{\"container\":\"${container_fixture}\"}}}" \
+      "${BASE_URL}/mcp")"
+    assert_contains "$container_body" '"structuredContent"' "get_container_status did not return structuredContent"
+    assert_not_contains "$container_body" '"create_command"' "get_container_status exposed create_command"
+    assert_not_contains "$container_body" '"source"' "get_container_status exposed a host mount source"
+  fi
+fi
+
+echo "[smoke] checking a cursor-capable journal page"
+logs_page_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":172,"method":"tools/call","params":{"name":"list_logs","arguments":{"start_utc":"1970-01-01T00:00:00Z","end_utc":"2100-01-01T00:00:00Z","allow_large_window":true,"limit":1}}}' \
+  "${BASE_URL}/mcp")"
+assert_contains "$logs_page_body" '"next_cursor"' "list_logs page did not include next_cursor"
+
+if command -v jq >/dev/null 2>&1; then
+  next_cursor="$(printf '%s' "$logs_page_body" | jq -r '.result.structuredContent.next_cursor // empty')"
+  if [[ -n "$next_cursor" ]]; then
+    second_page_payload="$(jq -cn --arg cursor "$next_cursor" '{jsonrpc:"2.0",id:173,method:"tools/call",params:{name:"list_logs",arguments:{start_utc:"1970-01-01T00:00:00Z",end_utc:"2100-01-01T00:00:00Z",allow_large_window:true,limit:1,cursor:$cursor}}}')"
+    second_page_body="$(curl -sS -X POST \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ${TOKEN}" \
+      -d "$second_page_payload" \
+      "${BASE_URL}/mcp")"
+    assert_contains "$second_page_body" '"structuredContent"' "list_logs second cursor page did not return structuredContent"
+  else
+    echo "[smoke] first journal page was exhausted; skipping second cursor page"
+  fi
+else
+  echo "[smoke] jq not available; skipping second cursor page"
+fi
 
 echo "[smoke] PASS"

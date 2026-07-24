@@ -14,6 +14,12 @@ pub enum AppError {
         code: &'static str,
         message: &'static str,
     },
+    #[error("bad request: {message}")]
+    BadRequestWithDetails {
+        code: &'static str,
+        message: &'static str,
+        details: serde_json::Value,
+    },
     #[error("unauthorized: {message}")]
     Unauthorized {
         code: &'static str,
@@ -46,6 +52,19 @@ impl AppError {
         Self::BadRequest { code, message }
     }
 
+    /// Creates a validation error carrying stable structured details.
+    pub fn bad_request_with_details(
+        code: &'static str,
+        message: &'static str,
+        details: serde_json::Value,
+    ) -> Self {
+        Self::BadRequestWithDetails {
+            code,
+            message,
+            details,
+        }
+    }
+
     /// Creates an unauthorized error used by auth and access checks.
     pub fn unauthorized(code: &'static str, message: &'static str) -> Self {
         Self::Unauthorized { code, message }
@@ -76,14 +95,27 @@ impl IntoResponse for AppError {
     /// Client responses remain opaque for internal failures, while detailed
     /// diagnostics are logged with an internal error identifier.
     fn into_response(self) -> Response {
-        let (status, code, message) = match self {
-            Self::BadRequest { code, message } => {
-                (StatusCode::BAD_REQUEST, code, message.to_string())
+        let (status, code, message, details) = match self {
+            Self::BadRequest { code, message } => (
+                StatusCode::BAD_REQUEST,
+                code,
+                message.to_string(),
+                json!({}),
+            ),
+            Self::BadRequestWithDetails {
+                code,
+                message,
+                details,
+            } => (StatusCode::BAD_REQUEST, code, message.to_string(), details),
+            Self::Unauthorized { code, message } => (
+                StatusCode::UNAUTHORIZED,
+                code,
+                message.to_string(),
+                json!({}),
+            ),
+            Self::Forbidden { code, message } => {
+                (StatusCode::FORBIDDEN, code, message.to_string(), json!({}))
             }
-            Self::Unauthorized { code, message } => {
-                (StatusCode::UNAUTHORIZED, code, message.to_string())
-            }
-            Self::Forbidden { code, message } => (StatusCode::FORBIDDEN, code, message.to_string()),
             Self::Internal { code, message } => {
                 // Log internal diagnostics for operators while keeping HTTP responses opaque.
                 let error_id = {
@@ -102,11 +134,15 @@ impl IntoResponse for AppError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     code,
                     "internal server error".to_string(),
+                    json!({}),
                 )
             }
-            Self::NotImplemented { code, message } => {
-                (StatusCode::NOT_IMPLEMENTED, code, message.to_string())
-            }
+            Self::NotImplemented { code, message } => (
+                StatusCode::NOT_IMPLEMENTED,
+                code,
+                message.to_string(),
+                json!({}),
+            ),
         };
 
         (
@@ -114,7 +150,7 @@ impl IntoResponse for AppError {
             Json(ErrorResponse {
                 code: code.to_string(),
                 message,
-                details: json!({}),
+                details,
             }),
         )
             .into_response()
