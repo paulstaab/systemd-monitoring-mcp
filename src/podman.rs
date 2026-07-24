@@ -355,7 +355,10 @@ mod tests {
             "CREATE_SECRET",
             "/host/private/secret-path",
         ] {
-            assert!(!serialized.contains(secret), "response leaked {secret}");
+            assert!(
+                !serialized.contains(secret),
+                "response leaked sensitive value"
+            );
         }
     }
 }
