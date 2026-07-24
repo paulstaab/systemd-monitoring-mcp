@@ -23,11 +23,14 @@ The server must be configurable via environment variables:
 - `MCP_API_TOKEN` (required): static bearer token used for API authentication. Must be at least 16 characters long.
 - `BIND_ADDR` (optional): bind address, default `127.0.0.1`.
 - `BIND_PORT` (optional): bind port, default `8080`.
+- `RATE_LIMIT_REQUESTS_PER_SECOND` (optional): process-wide token refill rate, default `10`; valid range `1..=1000000`.
+- `RATE_LIMIT_BURST` (optional): process-wide token capacity, default `20`; valid range `1..=1000000`.
 
 Startup behavior:
 - If `MCP_API_TOKEN` is missing or empty, server startup must fail with a clear error message.
 - If `MCP_API_TOKEN` is shorter than 16 characters, server startup must fail with a clear error message.
-- If optional bind values are missing, defaults must be applied.
+- If optional bind or rate-limit values are missing, defaults must be applied.
+- Zero, malformed, overflowing, or above-maximum rate-limit values must fail startup with a clear field-specific error.
 - If systemd is not available on the host/runtime environment, server startup must fail with a clear error message.
 
 ## 3. MCP Protocol Requirements
@@ -41,6 +44,9 @@ Startup behavior:
 - Systemd status endpoints must return `200 OK` with `scope` and `status` when the manager reports `running`.
 - Systemd status endpoints must return `503 Service Unavailable` with structured HTTP error shape when the manager reports any non-running state, including `degraded`.
 - Discovery metadata endpoint (`/.well-known/mcp`) may be exposed publicly and must advertise MCP endpoint path(s) only.
+- One process-wide token bucket must admit every HTTP request, including public routes, protected routes, missing or invalid credentials, and unmatched paths.
+- The bucket must initialize at full burst capacity, refill continuously at the configured rate up to the burst cap, and charge one token per request.
+- Rate limiting must run inside request-summary logging and before authentication, routing handlers, JSON-RPC processing, or monitoring-provider work; all router clones must share the same bucket.
 
 ### 3.2 Core JSON-RPC Semantics
 - Must accept JSON-RPC 2.0 request envelopes.
@@ -248,6 +254,7 @@ Token validation:
 - Requests to protected endpoint(s) with a non-bearer scheme or invalid token must be rejected.
 
 Status codes:
+- `429 Too Many Requests` for global admission rejection, with `Retry-After` rounded up to at least one second.
 - `401 Unauthorized` for missing or invalid token.
 - `500 Internal Server Error` for server-side transport failures.
 
@@ -282,13 +289,14 @@ MCP method failures must use JSON-RPC error objects with:
 - optional structured error data.
 
 Rules:
+- Rate-limit rejection must use HTTP status `429` and exact body `{ "code": "rate_limit_exceeded", "message": "rate limit exceeded", "details": {} }`, including on `/mcp`; it must not be wrapped in JSON-RPC.
 - Internal failures exposed to MCP clients must remain opaque and must not leak sensitive diagnostics.
 - Server logs may include internal diagnostic details for operators.
 
 ## 6. Logging Requirements
 
 Minimum required logs:
-- Startup logs including effective bind address/port.
+- Startup logs including effective bind address/port and rate-limit requests-per-second/burst values.
 - Authentication failure logs for rejected MCP requests.
 - Request summary logs (method, path, status, duration).
 - MCP action audit logs at INFO level for handled MCP methods, including method name, redacted params, and outcome (`success` or `failure`).
