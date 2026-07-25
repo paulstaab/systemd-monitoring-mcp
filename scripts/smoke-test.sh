@@ -165,6 +165,28 @@ user_systemd_available() {
   return 1
 }
 
+wait_for_rate_limit_recovery() {
+  local attempts=0
+  local max_attempts=40
+  local consecutive_successes=0
+
+  while (( attempts < max_attempts )); do
+    status_code="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/health" || true)"
+    if [[ "$status_code" == "200" ]]; then
+      consecutive_successes=$((consecutive_successes + 1))
+      if (( consecutive_successes >= 2 )); then
+        return 0
+      fi
+    else
+      consecutive_successes=0
+    fi
+    attempts=$((attempts + 1))
+    sleep 0.1
+  done
+
+  return 1
+}
+
 check_binary_available
 check_systemd_available
 
@@ -176,7 +198,7 @@ wait_for_health || fail "server did not become healthy in time"
 
 echo "[smoke] checking global HTTP rate limiting"
 RATE_RESULT_DIR="$(mktemp -d -t systemd-monitoring-mcp-rate.XXXXXX)"
-for request_number in $(seq 1 60); do
+for request_number in $(seq 1 30); do
   (
     curl -sS -D "${RATE_RESULT_DIR}/headers-${request_number}" \
       -o "${RATE_RESULT_DIR}/body-${request_number}" \
@@ -201,7 +223,7 @@ done
 [[ "$rate_limit_observed" == "true" ]] || fail "rapid request loop did not observe HTTP 429"
 rm -rf -- "$RATE_RESULT_DIR"
 RATE_RESULT_DIR=""
-sleep 1
+wait_for_rate_limit_recovery || fail "rate limiter did not recover in time for subsequent smoke checks"
 
 echo "[smoke] checking GET /health"
 health_body="$(curl -sS "${BASE_URL}/health")"
