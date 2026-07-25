@@ -9,6 +9,8 @@ PORT="${SMOKE_PORT:-8080}"
 TOKEN="${SMOKE_TOKEN:-change-me-token-16}"
 BINARY_PATH="${SMOKE_BINARY:-${ROOT_DIR}/target/release/systemd-monitoring-mcp}"
 BASE_URL="http://${HOST}:${PORT}"
+RATE_LIMIT_REQUESTS_PER_SECOND="${SMOKE_RATE_LIMIT_REQUESTS_PER_SECOND:-1000}"
+RATE_LIMIT_BURST="${SMOKE_RATE_LIMIT_BURST:-1000}"
 
 SERVER_LOG="$(mktemp -t systemd-monitoring-mcp-smoke.XXXXXX.log)"
 SERVER_PID=""
@@ -163,7 +165,12 @@ check_binary_available
 check_systemd_available
 
 echo "[smoke] starting server binary ${BINARY_PATH} on ${HOST}:${PORT}"
-MCP_API_TOKEN="$TOKEN" BIND_ADDR="$HOST" BIND_PORT="$PORT" "$BINARY_PATH" >"$SERVER_LOG" 2>&1 &
+MCP_API_TOKEN="$TOKEN" \
+  BIND_ADDR="$HOST" \
+  BIND_PORT="$PORT" \
+  RATE_LIMIT_REQUESTS_PER_SECOND="$RATE_LIMIT_REQUESTS_PER_SECOND" \
+  RATE_LIMIT_BURST="$RATE_LIMIT_BURST" \
+  "$BINARY_PATH" >"$SERVER_LOG" 2>&1 &
 SERVER_PID="$!"
 
 wait_for_health || fail "server did not become healthy in time"

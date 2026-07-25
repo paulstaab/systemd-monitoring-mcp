@@ -5,6 +5,7 @@
 Global admission limiting:
 
 - Configuration defaults to 10 requests per second and burst 20; explicit valid values are retained.
+- The functional smoke suite supplies an isolated high-capacity rate and burst so unrelated endpoint checks do not consume the production-default bucket.
 - Zero, malformed, overflowing, and above-maximum rate or burst values fail configuration parsing with field-specific errors.
 - A new bucket starts with its full burst, admits the first 20 immediate requests under defaults, and rejects the next request.
 - Refill is continuous, reaches admission at the correct fractional interval, never exceeds burst, and computes `Retry-After` rounded up to at least one second without wall-clock sleeps.

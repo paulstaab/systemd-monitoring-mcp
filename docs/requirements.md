@@ -30,6 +30,7 @@ Startup behavior:
 - If `MCP_API_TOKEN` is missing or empty, server startup must fail with a clear error message.
 - If `MCP_API_TOKEN` is shorter than 16 characters, server startup must fail with a clear error message.
 - If optional bind or rate-limit values are missing, defaults must be applied.
+- Valid explicit rate-limit values must be applied to the process-wide admission bucket.
 - Zero, malformed, overflowing, or above-maximum rate-limit values must fail startup with a clear field-specific error.
 - If systemd is not available on the host/runtime environment, server startup must fail with a clear error message.
 
