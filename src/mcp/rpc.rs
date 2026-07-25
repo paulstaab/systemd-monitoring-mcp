@@ -16,7 +16,8 @@ pub fn is_json_rpc_error(value: &Value) -> bool {
 /// Maps internal `AppError` values to stable JSON-RPC error responses.
 ///
 /// Validation failures map to `-32602`, auth failures to `-32001`, and internal
-/// failures to opaque `-32603` responses.
+/// failures to opaque `-32603` responses. Rate-limit errors also map opaquely
+/// if passed here, though global middleware normally returns them as HTTP 429.
 pub fn app_error_to_json_rpc(id: Option<Value>, err: AppError) -> Value {
     match err {
         AppError::BadRequest { code, message } => json_rpc_error_with_data(
@@ -51,7 +52,9 @@ pub fn app_error_to_json_rpc(id: Option<Value>, err: AppError) -> Value {
                 })),
             )
         }
-        AppError::Internal { .. } | AppError::NotImplemented { .. } => json_rpc_internal_error(id),
+        AppError::Internal { .. }
+        | AppError::NotImplemented { .. }
+        | AppError::TooManyRequests { .. } => json_rpc_internal_error(id),
     }
 }
 

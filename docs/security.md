@@ -17,9 +17,9 @@ This actor must not be able to:
 
 This actor may obtain the fixed public health response, public discovery metadata, and network-level
 signals such as reachability, response timing, and response size. These are accepted non-critical
-disclosures. Application-level denial of service by this actor is not accepted: unauthenticated
-requests must be rejected before monitoring-provider work. Volumetric attacks against the network or
-reverse proxy remain an infrastructure concern outside the application boundary.
+disclosures. Application-level denial of service by this actor is mitigated by a process-wide admission bucket that
+runs before authentication and monitoring-provider work. The shared bucket limits admitted application
+work but cannot prevent connection, bandwidth, request-body, or reverse-proxy exhaustion.
 
 ### Case 2: Network access with the token
 
@@ -34,7 +34,8 @@ This actor must not be able to:
 - make persistent changes to the server host or its workloads through this service; or
 - obtain secrets intentionally held by the host, providers, server configuration, or other clients.
 
-It is acceptable for this actor to exhaust service resources or disrupt availability.
+A valid-token actor shares the same bounded admission budget, but may still disrupt availability by
+consuming that shared budget or by issuing expensive admitted requests.
 
 “Persistent changes” includes starting, stopping, restarting, enabling, disabling, or editing systemd
 units; changing timers; writing or deleting files; changing processes, containers, pods, networking,
@@ -73,9 +74,11 @@ private interface and applying firewall rules reduces even this observable surfa
   does not relax read-only, validation, minimization, or redaction controls.
 - The process should run as a dedicated, least-privileged account with only the D-Bus, journal, and
   Podman access required for monitoring.
-- Denial of service is accepted only from an actor with a valid token. Network-edge connection,
-  request-body, concurrency, timeout, and rate limits should protect against unauthenticated volumetric
-  attacks.
+- One in-process token bucket covers every client and route, defaults to 10 requests per second with a
+  burst of 20, and runs before authentication. It bounds admitted application work but does not provide
+  per-client fairness or distributed coordination.
+- Network-edge connection, request-body, concurrency, timeout, bandwidth, and distributed rate limits
+  remain necessary for network-level attacks and deployments with multiple server processes.
 
 ## Attack Scenarios
 
@@ -84,11 +87,12 @@ private interface and applying firewall rules reduces even this observable surfa
 - **Response leakage:** broad monitoring requests seek credentials or raw provider configuration.
 - **Log leakage:** credentials in headers or parameters attempt to enter application logs.
 - **Token attacks:** guessing, timing analysis, interception, and replay target the static token.
-- **Resource exhaustion:** disruption is accepted only after successful token authentication.
+- **Resource exhaustion:** any client may consume the shared admission budget; admitted authenticated
+  work can remain expensive, while network-level exhaustion occurs outside the bucket.
 
 Controls include a read-only capability allowlist, strict validation, no shell execution, projected
 responses, secret-field omission and redaction, opaque errors, HMAC-based token comparison, bounded
-provider work, least privilege, TLS, and network access controls.
+provider work, global token-bucket admission, least privilege, TLS, and network access controls.
 
 ## Review Checklist for New Capabilities
 
