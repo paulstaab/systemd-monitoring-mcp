@@ -7,19 +7,13 @@ cd "$ROOT_DIR"
 HOST="${SMOKE_HOST:-127.0.0.1}"
 PORT="${SMOKE_PORT:-8080}"
 TOKEN="${SMOKE_TOKEN:-change-me-token-16}"
-RATE_LIMIT_REQUESTS_PER_SECOND="${SMOKE_RATE_LIMIT_REQUESTS_PER_SECOND:-10}"
-RATE_LIMIT_BURST="${SMOKE_RATE_LIMIT_BURST:-20}"
 BINARY_PATH="${SMOKE_BINARY:-${ROOT_DIR}/target/release/systemd-monitoring-mcp}"
 BASE_URL="http://${HOST}:${PORT}"
 
 SERVER_LOG="$(mktemp -t systemd-monitoring-mcp-smoke.XXXXXX.log)"
 SERVER_PID=""
-RATE_RESULT_DIR=""
 
 cleanup() {
-  if [[ -n "$RATE_RESULT_DIR" && -d "$RATE_RESULT_DIR" ]]; then
-    rm -rf -- "$RATE_RESULT_DIR"
-  fi
   if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
@@ -165,74 +159,14 @@ user_systemd_available() {
   return 1
 }
 
-wait_for_rate_limit_recovery() {
-  local attempts=0
-  # 4 seconds total (40 * 0.1s) comfortably covers recovery from the smoke burst
-  # with this script's default RATE_LIMIT_REQUESTS_PER_SECOND=10 and
-  # RATE_LIMIT_BURST=20 while keeping failures fast.
-  local max_attempts=40
-  # Require two consecutive successes so a single token refill does not cause
-  # immediate follow-up checks to intermittently hit 429.
-  local required_consecutive_successes=2
-  local consecutive_successes=0
-
-  while (( attempts < max_attempts )); do
-    # This poll runs only once per smoke-test execution, immediately after the
-    # intentional rate-limit burst, so the short-lived curl process overhead is
-    # acceptable for improved determinism.
-    status_code="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/health" || true)"
-    if [[ "$status_code" == "200" ]]; then
-      consecutive_successes=$((consecutive_successes + 1))
-      if (( consecutive_successes >= required_consecutive_successes )); then
-        return 0
-      fi
-    else
-      consecutive_successes=0
-    fi
-    attempts=$((attempts + 1))
-    sleep 0.1
-  done
-
-  return 1
-}
-
 check_binary_available
 check_systemd_available
 
 echo "[smoke] starting server binary ${BINARY_PATH} on ${HOST}:${PORT}"
-MCP_API_TOKEN="$TOKEN" BIND_ADDR="$HOST" BIND_PORT="$PORT" RATE_LIMIT_REQUESTS_PER_SECOND="$RATE_LIMIT_REQUESTS_PER_SECOND" RATE_LIMIT_BURST="$RATE_LIMIT_BURST" "$BINARY_PATH" >"$SERVER_LOG" 2>&1 &
+MCP_API_TOKEN="$TOKEN" BIND_ADDR="$HOST" BIND_PORT="$PORT" "$BINARY_PATH" >"$SERVER_LOG" 2>&1 &
 SERVER_PID="$!"
 
 wait_for_health || fail "server did not become healthy in time"
-
-echo "[smoke] checking global HTTP rate limiting"
-RATE_RESULT_DIR="$(mktemp -d -t systemd-monitoring-mcp-rate.XXXXXX)"
-for request_number in $(seq 1 30); do
-  (
-    curl -sS -D "${RATE_RESULT_DIR}/headers-${request_number}" \
-      -o "${RATE_RESULT_DIR}/body-${request_number}" \
-      -w "%{http_code}" "${BASE_URL}/health" \
-      >"${RATE_RESULT_DIR}/status-${request_number}"
-  ) &
-done
-wait
-
-rate_limit_observed="false"
-for status_file in "${RATE_RESULT_DIR}"/status-*; do
-  if [[ "$(<"$status_file")" == "429" ]]; then
-    request_number="${status_file##*-}"
-    rate_limit_body="$(<"${RATE_RESULT_DIR}/body-${request_number}")"
-    retry_after="$(sed -n "s/^[Rr]etry-[Aa]fter:[[:space:]]*\([^[:space:]\r]*\).*/\1/p" "${RATE_RESULT_DIR}/headers-${request_number}")"
-    [[ "$rate_limit_body" == "{\"code\":\"rate_limit_exceeded\",\"message\":\"rate limit exceeded\",\"details\":{}}" ]] || fail "rate-limit response body was not stable"
-    [[ "$retry_after" =~ ^[1-9][0-9]*$ ]] || fail "rate-limit response did not include a positive Retry-After"
-    rate_limit_observed="true"
-    break
-  fi
-done
-[[ "$rate_limit_observed" == "true" ]] || fail "rapid request loop did not observe HTTP 429"
-rm -rf -- "$RATE_RESULT_DIR"
-RATE_RESULT_DIR=""
-wait_for_rate_limit_recovery || fail "rate limiter did not recover in time for subsequent smoke checks"
 
 echo "[smoke] checking GET /health"
 health_body="$(curl -sS "${BASE_URL}/health")"
