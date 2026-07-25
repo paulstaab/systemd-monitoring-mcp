@@ -168,7 +168,8 @@ user_systemd_available() {
 wait_for_rate_limit_recovery() {
   local attempts=0
   # 4 seconds total (40 * 0.1s) comfortably covers recovery from the smoke burst
-  # with the default policy (10 req/s, burst 20) while keeping failures fast.
+  # with this script's default RATE_LIMIT_REQUESTS_PER_SECOND=10 and
+  # RATE_LIMIT_BURST=20 while keeping failures fast.
   local max_attempts=40
   # Require two consecutive successes so a single token refill does not cause
   # immediate follow-up checks to intermittently hit 429.
@@ -176,6 +177,9 @@ wait_for_rate_limit_recovery() {
   local consecutive_successes=0
 
   while (( attempts < max_attempts )); do
+    # This poll runs only once per smoke-test execution, immediately after the
+    # intentional rate-limit burst, so the short-lived curl process overhead is
+    # acceptable for improved determinism.
     status_code="$(curl -sS -o /dev/null -w "%{http_code}" "${BASE_URL}/health" || true)"
     if [[ "$status_code" == "200" ]]; then
       consecutive_successes=$((consecutive_successes + 1))
