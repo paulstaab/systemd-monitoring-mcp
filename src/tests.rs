@@ -1922,7 +1922,7 @@ async fn mcp_malformed_id_returns_invalid_request_without_provider_work() {
         .to_bytes();
     let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
 
-    assert_eq!(body_json["id"], serde_json::Value::Null);
+    assert_eq!(body_json.get("id"), Some(&serde_json::Value::Null));
     assert_eq!(body_json["error"]["code"], -32600);
     assert_eq!(service_list_calls.load(Ordering::SeqCst), 0);
 }
@@ -2102,6 +2102,15 @@ async fn mcp_parse_error_for_invalid_json() {
         .expect("request execution");
 
     assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+    assert_eq!(body_json.get("id"), Some(&serde_json::Value::Null));
+    assert_eq!(body_json["error"]["code"], -32700);
 }
 
 #[tokio::test]
