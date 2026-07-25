@@ -6,15 +6,33 @@
 
 version: 2
 updates:
- - package-ecosystem: "devcontainers"
-   directory: "/"
-   schedule:
-     interval: weekly
-   assignees:
-     - "paulstaab"
- - package-ecosystem: "cargo"
-   directory: "/"
-   schedule:
-     interval: weekly
-   assignees:
-     - "paulstaab"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: weekly
+    assignees:
+      - paulstaab
+    groups:
+      everything:
+        patterns:
+          - '*'
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    schedule:
+      interval: weekly
+    assignees:
+      - "paulstaab"
+    groups:
+      everything:
+        patterns:
+          - '*'
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: weekly
+    assignees:
+      - "paulstaab"
+    groups:
+      everything:
+        patterns:
+          - '*'
