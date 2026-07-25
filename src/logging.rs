@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use axum::{extract::Request, middleware::Next, response::Response};
 use tracing::{info, warn};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 /// Initializes tracing subscriber configuration for the server process.
 ///

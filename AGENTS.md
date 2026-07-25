@@ -13,7 +13,6 @@ a Linux server over JSON-RPC.
 
 ## Repository Pointers
 - Requirements: `docs/requirements.md`
-- Implementation plan: `docs/implementation-plan.md`
 - Improvement ideas backlog: `docs/improvement-ideas.md`
 - Entry point: `src/main.rs`
 - App wiring and route composition: `src/lib.rs`
@@ -40,11 +39,10 @@ The application is organized into modules with a strict separation of concerns:
 When asked to implement new features or changes, execute the following steps
   1. If neccessary, ask the user clarifying questions.
   2. Update the requirements in `docs/requirements.md`
-  3. Generate a plan for implementing the changes
-  4. Generate test cases for the requirements in a separate artifact (not in `docs/requirements.md`).
-  5. Extend or update the smoke test script `scripts/smoke-test.sh`
-  6. Implement the changes.
-  7. Run tests and linters and investigate and fix any problems.
+  3. Generate test cases for the requirements in a separate artifact (not in `docs/requirements.md`).
+  4. Extend or update the smoke test script `scripts/smoke-test.sh`
+  5. Implement the changes.
+  6. Run tests and linters and investigate and fix any problems.
 
 ## Requirements
 - Collect requirements in `docs/requirements.md`. 

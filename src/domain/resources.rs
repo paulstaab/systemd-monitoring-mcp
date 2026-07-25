@@ -4,16 +4,16 @@
 
 use chrono::{Duration, Utc};
 use rust_mcp_sdk::schema::{ReadResourceRequestParams, Resource};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::domain::responses::json_text_resource_response;
-use crate::domain::utils::{filter_services_by_state, DEFAULT_LOG_LIMIT};
+use crate::domain::utils::{DEFAULT_LOG_LIMIT, filter_services_by_state};
 use crate::mcp::rpc::{
     app_error_to_json_rpc, json_rpc_invalid_params, json_rpc_method_not_found_with_data,
 };
 use crate::{
-    systemd_client::{LogQuery, UnitScope},
     AppState,
+    systemd_client::{LogQuery, UnitScope},
 };
 
 pub const SERVICES_RESOURCE_URI: &str = "resource://services/snapshot";

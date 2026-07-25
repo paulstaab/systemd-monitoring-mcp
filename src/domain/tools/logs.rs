@@ -1,18 +1,18 @@
 use chrono::Duration;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::domain::responses::{generated_at_utc_string, tool_success_response};
 use crate::domain::utils::{
-    normalize_priority, normalize_scope, normalize_unit, parse_utc, DEFAULT_LOG_LIMIT,
-    MAX_LOG_LIMIT,
+    DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT, normalize_priority, normalize_scope, normalize_unit,
+    parse_utc,
 };
 use crate::mcp::rpc::{app_error_to_json_rpc, json_rpc_invalid_params};
 use crate::{
+    AppState,
     errors::AppError,
     systemd_client::{LogOrder, LogQuery, UnitScope},
-    AppState,
 };
 
 use super::LogsQueryParams;
@@ -81,10 +81,8 @@ fn build_log_summary(entries: &[crate::systemd_client::JournalLogEntry]) -> LogS
             .map(|priority| priority <= 3)
             .unwrap_or(false);
 
-        if is_error {
-            if let Some(unit) = &entry.unit {
-                *error_hotspots_raw.entry(unit.clone()).or_insert(0) += 1;
-            }
+        if is_error && let Some(unit) = &entry.unit {
+            *error_hotspots_raw.entry(unit.clone()).or_insert(0) += 1;
         }
     }
 
@@ -288,7 +286,7 @@ pub fn build_log_query(params: LogsQueryParams) -> Result<LogQuery, AppError> {
             return Err(AppError::bad_request(
                 "invalid_order",
                 "order must be one of: asc, desc",
-            ))
+            ));
         }
     };
 
@@ -378,7 +376,7 @@ pub async fn handle_list_logs(
                         "invalid_unit",
                         "since_last_start requires exactly one unit",
                     ),
-                )
+                );
             }
         };
         let scope = match normalize_scope(
@@ -396,7 +394,7 @@ pub async fn handle_list_logs(
                         "invalid_scope",
                         "since_last_start requires one unit and system or user scope",
                     ),
-                )
+                );
             }
         };
         match state.unit_provider.unit_main_start(&unit, scope).await {
@@ -413,7 +411,7 @@ pub async fn handle_list_logs(
                         "unit_start_unavailable",
                         "unit main-process start is unavailable",
                     ),
-                )
+                );
             }
             Err(err) => return app_error_to_json_rpc(id, err),
         }
@@ -457,19 +455,23 @@ pub async fn handle_list_logs(
             let window = serde_json::Map::from_iter([
                 (
                     "start_utc".to_string(),
-                    json!(normalized
-                        .query
-                        .start_utc
-                        .expect("validated start_utc")
-                        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+                    json!(
+                        normalized
+                            .query
+                            .start_utc
+                            .expect("validated start_utc")
+                            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                    ),
                 ),
                 (
                     "end_utc".to_string(),
-                    json!(normalized
-                        .query
-                        .end_utc
-                        .expect("validated end_utc")
-                        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+                    json!(
+                        normalized
+                            .query
+                            .end_utc
+                            .expect("validated end_utc")
+                            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                    ),
                 ),
             ]);
 

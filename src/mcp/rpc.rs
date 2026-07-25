@@ -6,7 +6,7 @@ use crate::errors::AppError;
 use rust_mcp_sdk::schema::{
     JsonrpcErrorResponse, JsonrpcResultResponse, RequestId, Result as McpResult, RpcError,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Returns `true` when a JSON-RPC response payload contains an `error` object.
 pub fn is_json_rpc_error(value: &Value) -> bool {
@@ -106,21 +106,40 @@ pub fn json_rpc_error(id: Option<Value>, code: i32, message: &str) -> Value {
 }
 
 /// Creates a JSON-RPC error response with optional structured `data` details.
+///
+/// Valid scalar IDs use the SDK response type. Missing or invalid IDs use an
+/// explicit null ID, as required for errors where the request ID is unavailable.
 pub fn json_rpc_error_with_data(
     id: Option<Value>,
     code: i32,
     message: &str,
     data: Option<Value>,
 ) -> Value {
-    let response = JsonrpcErrorResponse::new(
-        RpcError {
-            code: i64::from(code),
-            data,
-            message: message.to_string(),
-        },
-        id.as_ref().and_then(value_to_request_id),
-    );
-    serde_json::to_value(response).expect("jsonrpc error response serialization")
+    if let Some(request_id) = id.as_ref().and_then(value_to_request_id) {
+        let response = JsonrpcErrorResponse::new(
+            RpcError {
+                code: i64::from(code),
+                data,
+                message: message.to_string(),
+            },
+            Some(request_id),
+        );
+        return serde_json::to_value(response).expect("jsonrpc error response serialization");
+    }
+
+    let mut error = json!({
+        "code": code,
+        "message": message,
+    });
+    if let Some(data) = data {
+        error["data"] = data;
+    }
+
+    json!({
+        "jsonrpc": "2.0",
+        "id": null,
+        "error": error,
+    })
 }
 
 /// Creates a JSON-RPC result response preserving request id semantics.

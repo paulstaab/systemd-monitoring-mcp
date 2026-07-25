@@ -13,13 +13,13 @@ use rust_mcp_sdk::{
     schema::{CallToolRequestParams, Tool},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::mcp::rpc::{json_rpc_invalid_params, json_rpc_method_not_found_with_data};
 use crate::AppState;
+use crate::mcp::rpc::{json_rpc_invalid_params, json_rpc_method_not_found_with_data};
 
 pub use logs::build_log_query;
-pub use timers::{parse_timers_query_params, sort_timer_items, TimerItem};
+pub use timers::{TimerItem, parse_timers_query_params, sort_timer_items};
 
 #[derive(Debug, Deserialize)]
 pub struct ServicesQueryParams {
@@ -102,14 +102,15 @@ Optional filters must be omitted when unset: do not send priority=\".*\" \
 for all priorities, and do not send unit=\"\" for all units. \
 priority accepts journald severity thresholds 0-7 and aliases: emerg, alert, \
 crit, err, warning, notice, info, debug. Use grep for message substring or \
-regex-lite matching."
+regex-lite matching. start_utc is required unless since_last_start=true; \
+when since_last_start=true, omit start_utc and provide exactly one unit."
 )]
 #[derive(Debug, Deserialize, Serialize, macros::JsonSchema)]
 pub struct ListLogsTool {
     pub scope: Option<String>,
     pub priority: Option<String>,
     pub unit: Option<String>,
-    pub start_utc: String,
+    pub start_utc: Option<String>,
     pub end_utc: String,
     pub grep: Option<String>,
     pub exclude_units: Option<Vec<String>>,
@@ -200,7 +201,7 @@ pub async fn handle_tools_call(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_log_query, parse_timers_query_params, sort_timer_items, LogsQueryParams, TimerItem,
+        LogsQueryParams, TimerItem, build_log_query, parse_timers_query_params, sort_timer_items,
     };
     use crate::domain::utils::MAX_LOG_LIMIT;
     use serde_json::json;

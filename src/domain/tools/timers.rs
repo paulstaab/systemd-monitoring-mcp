@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
@@ -11,7 +11,7 @@ use crate::domain::utils::{
 };
 use crate::mcp::rpc::app_error_to_json_rpc;
 use crate::systemd_client::UnitScope;
-use crate::{errors::AppError, AppState};
+use crate::{AppState, errors::AppError};
 
 #[derive(Debug)]
 pub struct TimersQueryParams {
@@ -439,26 +439,24 @@ pub async fn handle_list_timers(
 
             sort_timer_items(&mut timers, &normalized.sort, &normalized.order);
 
+            let page = paginate_rows(timers, normalized.limit);
+            let generated_at_utc = generated_at_utc_string();
+
             if normalized.summary_enabled {
-                let summary = build_timer_summary(&timers);
-                let total_scanned = timers.len();
-                let generated_at_utc = generated_at_utc_string();
+                let summary = build_timer_summary(&page.rows);
 
                 return tool_success_response(
                     id,
                     "Returned timer triage summary".to_string(),
                     serde_json::Map::from_iter([
                         ("summary".to_string(), json!(summary)),
-                        ("total_scanned".to_string(), json!(total_scanned)),
-                        ("returned".to_string(), json!(total_scanned)),
-                        ("truncated".to_string(), json!(false)),
+                        ("total_scanned".to_string(), json!(page.total)),
+                        ("returned".to_string(), json!(page.returned)),
+                        ("truncated".to_string(), json!(page.truncated)),
                         ("generated_at_utc".to_string(), json!(generated_at_utc)),
                     ]),
                 );
             }
-
-            let page = paginate_rows(timers, normalized.limit);
-            let generated_at_utc = generated_at_utc_string();
 
             tool_success_response(
                 id,

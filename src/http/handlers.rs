@@ -3,20 +3,20 @@
 //! Provides the primary Model Context Protocol endpoint, and general metadata endpoints.
 
 use axum::{
+    Json,
     body::Bytes,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
+use crate::AppState;
 use crate::errors::ErrorResponse;
 use crate::mcp::rpc::{json_rpc_invalid_request, json_rpc_parse_error};
 use crate::mcp::server::handle_json_rpc_value;
 use crate::systemd_client::UnitScope;
-use crate::AppState;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
