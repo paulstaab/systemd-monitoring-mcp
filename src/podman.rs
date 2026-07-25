@@ -1,7 +1,7 @@
 //! Read-only Podman CLI integration with compact, schema-stable responses.
 
 use async_trait::async_trait;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::{process::Stdio, time::Duration};
 use tokio::process::Command;
 
@@ -154,10 +154,10 @@ fn sanitize_argv(value: Option<&Value>) -> Value {
                     redact_next = false;
                     return Value::String("[REDACTED]".to_string());
                 }
-                if let Some((name, _value)) = argument.split_once('=') {
-                    if is_sensitive_argument_name(name) {
-                        return Value::String(format!("{name}=[REDACTED]"));
-                    }
+                if let Some((name, _value)) = argument.split_once('=')
+                    && is_sensitive_argument_name(name)
+                {
+                    return Value::String(format!("{name}=[REDACTED]"));
                 }
                 if is_sensitive_argument_name(argument) {
                     if argument.starts_with('-') && !argument.chars().any(char::is_whitespace) {

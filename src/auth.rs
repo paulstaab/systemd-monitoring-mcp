@@ -1,15 +1,15 @@
 use axum::{
     extract::{Request, State},
-    http::header,
     http::HeaderValue,
+    http::header,
     middleware::Next,
     response::Response,
 };
-use axum_extra::headers::{authorization::Bearer, Authorization, Header};
+use axum_extra::headers::{Authorization, Header, authorization::Bearer};
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
-use crate::{errors::AppError, AppState};
+use crate::{AppState, errors::AppError};
 
 type HmacSha256 = Hmac<Sha256>;
 const AUTH_COMPARE_KEY: &[u8] = b"systemd-monitoring-mcp bearer token comparison";

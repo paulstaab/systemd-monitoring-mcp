@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
 use systemd_monitoring_mcp::{
-    build_app,
+    AppState, build_app,
     config::Config,
     logging,
-    systemd_client::{ensure_systemd_available, DbusSystemdClient},
-    AppState,
+    systemd_client::{DbusSystemdClient, ensure_systemd_available},
 };
 use tracing::info;
 

@@ -1,11 +1,11 @@
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 use axum::{
     body::Body,
-    http::{header, Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use tower::ServiceExt;
@@ -660,9 +660,9 @@ async fn mcp_unknown_method_returns_method_not_found() {
         .expect("collect body")
         .to_bytes();
     assert_eq!(
-            body,
-            "{\"error\":{\"code\":-32601,\"message\":\"Method not found\"},\"id\":1,\"jsonrpc\":\"2.0\"}"
-        );
+        body,
+        "{\"error\":{\"code\":-32601,\"message\":\"Method not found\"},\"id\":1,\"jsonrpc\":\"2.0\"}"
+    );
 }
 
 #[tokio::test]
@@ -826,6 +826,12 @@ async fn mcp_tools_list_returns_required_tools() {
     assert!(list_logs_description.contains("priority=\".*\""));
     assert!(list_logs_description.contains("unit=\"\""));
     assert!(list_logs_description.contains("Use grep"));
+    assert!(list_logs_description.contains("start_utc is required unless since_last_start=true"));
+    let list_logs_required = body_json["result"]["tools"][2]["inputSchema"]["required"]
+        .as_array()
+        .expect("list_logs required fields");
+    assert!(list_logs_required.iter().any(|field| field == "end_utc"));
+    assert!(!list_logs_required.iter().any(|field| field == "start_utc"));
 }
 
 #[tokio::test]
@@ -951,6 +957,47 @@ async fn mcp_tools_call_list_timers_summary_with_overdue_only_returns_expected_c
             .as_array()
             .map(|rows| rows.iter().any(|row| row["unit"] == "overdue.timer"))
             .unwrap_or(false)
+    );
+}
+
+/// Verifies timer summaries use the limited page and truthful pagination metadata.
+#[tokio::test]
+async fn mcp_tools_call_list_timers_summary_applies_limit() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/mcp")
+                .method("POST")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                .body(Body::from(
+                    r#"{"jsonrpc":"2.0","id":329,"method":"tools/call","params":{"name":"list_timers","arguments":{"summary":true,"limit":1}}}"#,
+                ))
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+
+    assert_eq!(body_json["result"]["structuredContent"]["total_scanned"], 3);
+    assert_eq!(body_json["result"]["structuredContent"]["returned"], 1);
+    assert_eq!(body_json["result"]["structuredContent"]["truncated"], true);
+    assert_eq!(
+        body_json["result"]["structuredContent"]["summary"]["counts_by_active_state"]
+            .as_object()
+            .map(|counts| counts
+                .values()
+                .filter_map(serde_json::Value::as_u64)
+                .sum::<u64>()),
+        Some(1),
     );
 }
 
@@ -1245,10 +1292,12 @@ async fn mcp_tools_call_list_timers_scope_both_returns_combined_rows() {
     assert_eq!(body_json["jsonrpc"], "2.0");
     assert_eq!(body_json["id"], 322);
     assert_eq!(body_json["result"]["structuredContent"]["returned"], 4);
-    assert!(body_json["result"]["structuredContent"]["timers"]
-        .as_array()
-        .map(|rows| rows.iter().any(|row| row["unit"] == "user-sync.timer"))
-        .unwrap_or(false));
+    assert!(
+        body_json["result"]["structuredContent"]["timers"]
+            .as_array()
+            .map(|rows| rows.iter().any(|row| row["unit"] == "user-sync.timer"))
+            .unwrap_or(false)
+    );
 }
 
 #[tokio::test]
@@ -1281,12 +1330,16 @@ async fn mcp_tools_call_list_services_scope_both_preserves_same_name_rows() {
         .expect("services array");
 
     assert_eq!(services.len(), 2);
-    assert!(services
-        .iter()
-        .any(|row| row["unit"] == "shared.service" && row["scope"] == "system"));
-    assert!(services
-        .iter()
-        .any(|row| row["unit"] == "shared.service" && row["scope"] == "user"));
+    assert!(
+        services
+            .iter()
+            .any(|row| row["unit"] == "shared.service" && row["scope"] == "system")
+    );
+    assert!(
+        services
+            .iter()
+            .any(|row| row["unit"] == "shared.service" && row["scope"] == "user")
+    );
 }
 
 #[tokio::test]
@@ -1319,12 +1372,16 @@ async fn mcp_tools_call_list_timers_scope_both_preserves_same_name_rows() {
         .expect("timers array");
 
     assert_eq!(timers.len(), 2);
-    assert!(timers
-        .iter()
-        .any(|row| row["unit"] == "shared.timer" && row["scope"] == "system"));
-    assert!(timers
-        .iter()
-        .any(|row| row["unit"] == "shared.timer" && row["scope"] == "user"));
+    assert!(
+        timers
+            .iter()
+            .any(|row| row["unit"] == "shared.timer" && row["scope"] == "system")
+    );
+    assert!(
+        timers
+            .iter()
+            .any(|row| row["unit"] == "shared.timer" && row["scope"] == "user")
+    );
 }
 
 #[tokio::test]
@@ -1506,7 +1563,7 @@ async fn mcp_tools_call_list_services_summary_returns_compact_block() {
                     .header(header::CONTENT_TYPE, "application/json")
                     .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
                     .body(Body::from(
-                        r#"{"jsonrpc":"2.0","id":313,"method":"tools/call","params":{"name":"list_services","arguments":{"summary":true}}}"#,
+                        r#"{"jsonrpc":"2.0","id":313,"method":"tools/call","params":{"name":"list_services","arguments":{"summary":true,"limit":1}}}"#,
                     ))
                     .expect("request build"),
             )
@@ -1528,13 +1585,19 @@ async fn mcp_tools_call_list_services_summary_returns_compact_block() {
         body_json["result"]["structuredContent"]["summary"]["counts_by_active_state"].is_object()
     );
     assert!(body_json["result"]["structuredContent"]["summary"]["failed_units"].is_array());
-    assert!(body_json["result"]["structuredContent"]["summary"]["degraded_hint"].is_string());
-    assert!(body_json["result"]["structuredContent"]["total"].is_number());
-    assert!(body_json["result"]["structuredContent"]["returned"].is_number());
-    assert!(body_json["result"]["structuredContent"]["truncated"].is_boolean());
-    assert!(body_json["result"]["structuredContent"]
-        .get("services")
-        .is_none());
+    assert!(body_json["result"]["structuredContent"]["summary"]["degraded_hint"].is_null());
+    assert_eq!(
+        body_json["result"]["structuredContent"]["summary"]["counts_by_active_state"]["inactive"],
+        1
+    );
+    assert_eq!(body_json["result"]["structuredContent"]["total"], 3);
+    assert_eq!(body_json["result"]["structuredContent"]["returned"], 1);
+    assert_eq!(body_json["result"]["structuredContent"]["truncated"], true);
+    assert!(
+        body_json["result"]["structuredContent"]
+            .get("services")
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -1573,9 +1636,11 @@ async fn mcp_tools_call_list_logs_summary_returns_compact_block() {
     assert!(body_json["result"]["structuredContent"]["returned"].is_number());
     assert!(body_json["result"]["structuredContent"]["truncated"].is_boolean());
     assert!(body_json["result"]["structuredContent"]["window"].is_object());
-    assert!(body_json["result"]["structuredContent"]
-        .get("logs")
-        .is_none());
+    assert!(
+        body_json["result"]["structuredContent"]
+            .get("logs")
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -1824,6 +1889,44 @@ async fn mcp_notification_returns_no_content() {
     assert!(body.is_empty());
 }
 
+/// Rejects a malformed present ID before an untagged notification fallback can dispatch it.
+#[tokio::test]
+async fn mcp_malformed_id_returns_invalid_request_without_provider_work() {
+    let system_state_calls = Arc::new(AtomicUsize::new(0));
+    let service_list_calls = Arc::new(AtomicUsize::new(0));
+    let provider = Arc::new(CountingProvider {
+        system_state_calls,
+        service_list_calls: Arc::clone(&service_list_calls),
+    });
+    let response = app_with_provider(provider)
+        .oneshot(
+            Request::builder()
+                .uri("/mcp")
+                .method("POST")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, "Bearer token-1234567890ab")
+                .body(Body::from(
+                    r#"{"jsonrpc":"2.0","id":{},"method":"tools/call","params":{"name":"list_services","arguments":{}}}"#,
+                ))
+                .expect("request build"),
+        )
+        .await
+        .expect("request execution");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body_json: serde_json::Value = serde_json::from_slice(&body).expect("valid json response");
+
+    assert_eq!(body_json["id"], serde_json::Value::Null);
+    assert_eq!(body_json["error"]["code"], -32600);
+    assert_eq!(service_list_calls.load(Ordering::SeqCst), 0);
+}
+
 #[tokio::test]
 async fn mcp_batch_notifications_return_no_content() {
     let response = app()
@@ -2032,6 +2135,7 @@ async fn mcp_tools_call_list_logs_since_last_start_rejects_invalid_scope() {
 
 struct CountingProvider {
     system_state_calls: Arc<AtomicUsize>,
+    service_list_calls: Arc<AtomicUsize>,
 }
 
 #[async_trait::async_trait]
@@ -2042,11 +2146,12 @@ impl UnitProvider for CountingProvider {
         Ok("running".to_string())
     }
 
-    /// Returns no services because rate-limit routing tests do not inspect them.
+    /// Counts service-list calls so invalid envelopes can prove provider bypass.
     async fn list_service_units(
         &self,
         _scope: UnitScope,
     ) -> Result<Vec<UnitStatus>, crate::errors::AppError> {
+        self.service_list_calls.fetch_add(1, Ordering::SeqCst);
         Ok(Vec::new())
     }
 
@@ -2137,8 +2242,10 @@ async fn global_rate_limit_exhausts_burst_with_stable_http_error() {
 #[tokio::test]
 async fn all_route_and_authentication_classes_share_budget() {
     let calls = Arc::new(AtomicUsize::new(0));
+    let service_list_calls = Arc::new(AtomicUsize::new(0));
     let provider = Arc::new(CountingProvider {
         system_state_calls: Arc::clone(&calls),
+        service_list_calls,
     });
     let app = app_with_rate_limit(1, 5, provider);
 

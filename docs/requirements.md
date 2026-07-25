@@ -53,6 +53,7 @@ Startup behavior:
 - Must accept JSON-RPC 2.0 request envelopes.
 - Must support both single-request and batch-request payloads.
 - Must support notifications (`id` absent) and return no response body for notification-only requests.
+- An `id` that is present must be a string or integer; null, fractional, array, and object IDs must return JSON-RPC error `-32600` and must not dispatch the method or invoke monitoring providers.
 - Must return JSON-RPC error `-32700` for invalid JSON payloads.
 - Must return JSON-RPC error `-32600` for invalid request envelopes.
 - Must return JSON-RPC error `-32601` for unknown methods.
@@ -114,6 +115,7 @@ Startup behavior:
   - `truncated` (boolean): true when `total > returned`
   - `generated_at_utc` (RFC3339 UTC string)
 - `list_services` summary responses must include the same response metadata fields as detailed responses.
+- `list_services` summary mode must apply `limit` before building the summary; `returned` and `truncated` must describe that limited page while `total` remains the pre-limit match count.
 - If `summary=true`, `list_services` must return a compact summary block including:
   - `counts_by_active_state` (map)
   - `failed_units` (array of objects with `unit`, `sub_state`, `result`, `since_utc`)
@@ -201,6 +203,7 @@ Startup behavior:
   - `truncated` (boolean)
   - `generated_at_utc` (RFC3339 UTC string)
 - `list_timers` summary responses must include the same response metadata fields as detailed responses.
+- `list_timers` summary mode must apply `limit` before building the summary; `returned` and `truncated` must describe that limited page while `total_scanned` remains the pre-limit filtered count.
 - Overdue detection rules:
   - A timer is considered overdue only when all are true:
     - `next_run_utc` is known,
@@ -333,9 +336,10 @@ Sensitive data handling:
 
 - `list_logs` accepts optional `cursor`, unique `fields`, `group_by=message`, and `since_last_start`.
 - `fields` may contain only `timestamp_utc`, `unit`, `priority`, `hostname`, `pid`, `message`, and `cursor`; omission returns all fields.
-- A cursor resumes exclusively in the selected order. Invalid/expired cursors return `invalid_cursor`; callers must retain the original scope, filters, window, grouping, and projection.
+- A cursor must resolve to the exact referenced journal entry before continuation. It then resumes exclusively in the selected order. Invalid, expired, or nearest-entry-only cursor seeks return `invalid_cursor`; callers must retain the original scope, filters, window, grouping, and projection.
 - `next_cursor` is returned only when another matching raw row exists. Page metadata describes the current page.
 - `since_last_start=true` requires exactly one unit and no explicit `start_utc`, derives the bound from its latest main-process start, and returns `unit_start_unavailable` when unknown.
+- The advertised `list_logs` input schema must make `start_utc` optional so schema-validating clients can omit it with `since_last_start=true`; the tool description and runtime validation must state that it remains required otherwise.
 - Plain `grep` remains case-sensitive literal matching. Slash-delimited values are Rust regular expressions, including alternation such as `/ERROR|fatal/`.
 - `group_by=message` groups identical `(unit, priority, message)` values within the fetched raw page and adds `count`, `first_timestamp_utc`, and `last_timestamp_utc`; continuation advances over raw rows.
 - The seven-day window is inclusive. Oversized-window errors include `maximum_start_utc = end_utc - 7 days` in structured details.

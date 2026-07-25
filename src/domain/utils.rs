@@ -78,10 +78,12 @@ pub fn normalize_priority(priority: Option<String>) -> Result<Option<String>, Ap
         "5" | "notice" => "5",
         "6" | "info" | "informational" => "6",
         "7" | "debug" => "7",
-        _ => return Err(AppError::bad_request(
-            "invalid_priority",
-            "priority must be one of 0-7 or: emerg, alert, crit, err, warning, notice, info, debug",
-        )),
+        _ => {
+            return Err(AppError::bad_request(
+                "invalid_priority",
+                "priority must be one of 0-7 or: emerg, alert, crit, err, warning, notice, info, debug",
+            ));
+        }
     };
 
     Ok(Some(mapped.to_string()))

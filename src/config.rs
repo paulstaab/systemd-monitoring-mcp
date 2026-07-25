@@ -3,7 +3,7 @@ use std::{env, net::SocketAddr};
 use thiserror::Error;
 
 use crate::rate_limit::{
-    RateLimitPolicy, DEFAULT_BURST, DEFAULT_REQUESTS_PER_SECOND, MAX_BURST, MAX_REQUESTS_PER_SECOND,
+    DEFAULT_BURST, DEFAULT_REQUESTS_PER_SECOND, MAX_BURST, MAX_REQUESTS_PER_SECOND, RateLimitPolicy,
 };
 
 const MIN_API_TOKEN_LENGTH: usize = 16;

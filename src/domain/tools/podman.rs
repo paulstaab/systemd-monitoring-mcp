@@ -1,12 +1,12 @@
 //! MCP handlers for compact read-only Podman inspection.
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{
+    AppState,
     domain::responses::tool_success_response,
     mcp::rpc::{app_error_to_json_rpc, json_rpc_invalid_params},
-    AppState,
 };
 
 #[derive(Debug, Deserialize)]

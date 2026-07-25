@@ -6,7 +6,7 @@ use crate::errors::AppError;
 use rust_mcp_sdk::schema::{
     JsonrpcErrorResponse, JsonrpcResultResponse, RequestId, Result as McpResult, RpcError,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Returns `true` when a JSON-RPC response payload contains an `error` object.
 pub fn is_json_rpc_error(value: &Value) -> bool {

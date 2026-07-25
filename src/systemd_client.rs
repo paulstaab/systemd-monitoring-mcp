@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use systemd::{daemon, journal};
 use thiserror::Error;
 use tracing::warn;
-use zbus::{zvariant::OwnedObjectPath, Connection, Proxy};
+use zbus::{Connection, Proxy, zvariant::OwnedObjectPath};
 
 use crate::errors::AppError;
 
@@ -1226,6 +1226,73 @@ fn sanitize_log_message(message: Option<String>) -> Option<String> {
     })
 }
 
+/// Abstracts the three cursor operations needed for exact continuation validation.
+///
+/// The production implementation delegates to `systemd::Journal`; tests use a
+/// deterministic fake because journal availability is host-dependent.
+trait JournalCursorNavigation {
+    /// Seeks to the position associated with an opaque journal cursor.
+    fn seek_to_cursor(&mut self, cursor: &str) -> std::io::Result<()>;
+
+    /// Selects the entry at or nearest after the seek position.
+    fn select_sought_entry(&mut self) -> std::io::Result<u64>;
+
+    /// Tests whether the selected entry is the exact requested cursor.
+    fn selected_entry_matches(&self, cursor: &str) -> std::io::Result<bool>;
+}
+
+impl JournalCursorNavigation for systemd::Journal {
+    /// Delegates cursor seeking to libsystemd.
+    fn seek_to_cursor(&mut self, cursor: &str) -> std::io::Result<()> {
+        self.seek_cursor(cursor)
+    }
+
+    /// Advances once so libsystemd selects the sought cursor entry.
+    fn select_sought_entry(&mut self) -> std::io::Result<u64> {
+        self.next()
+    }
+
+    /// Uses libsystemd cursor comparison because cursor strings are opaque.
+    fn selected_entry_matches(&self, cursor: &str) -> std::io::Result<bool> {
+        self.test_cursor(cursor)
+    }
+}
+
+/// Creates the stable validation error for unusable journal cursors.
+fn invalid_cursor_error() -> AppError {
+    AppError::bad_request("invalid_cursor", "journal cursor is invalid or expired")
+}
+
+/// Selects and verifies the exact cursor entry before exclusive continuation.
+///
+/// `seek_cursor` may succeed by choosing a nearby entry when its target has
+/// expired. Advancing once and testing the opaque cursor rejects that fallback.
+/// The caller then performs its normal next/previous iteration, which excludes
+/// the verified cursor entry from the returned page.
+fn position_at_exact_cursor<J: JournalCursorNavigation>(
+    reader: &mut J,
+    cursor: &str,
+) -> Result<(), AppError> {
+    reader
+        .seek_to_cursor(cursor)
+        .map_err(|_| invalid_cursor_error())?;
+    let advanced = reader
+        .select_sought_entry()
+        .map_err(|_| invalid_cursor_error())?;
+    if advanced == 0 {
+        return Err(invalid_cursor_error());
+    }
+
+    let exact = reader
+        .selected_entry_matches(cursor)
+        .map_err(|_| invalid_cursor_error())?;
+    if !exact {
+        return Err(invalid_cursor_error());
+    }
+
+    Ok(())
+}
+
 /// Reads journald entries according to time, unit, priority, and grep filters.
 ///
 /// Applies ordering and limit constraints and returns both entries and scan count.
@@ -1261,9 +1328,7 @@ fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
     };
 
     if let Some(cursor) = query.cursor.as_deref() {
-        reader.seek_cursor(cursor).map_err(|_| {
-            AppError::bad_request("invalid_cursor", "journal cursor is invalid or expired")
-        })?;
+        position_at_exact_cursor(&mut reader, cursor)?;
     } else {
         match query.order {
             LogOrder::Desc => {
@@ -1346,24 +1411,22 @@ fn read_journal_logs(query: &LogQuery) -> Result<LogQueryResult, AppError> {
         let user_unit = read_journal_field(&mut reader, "_SYSTEMD_USER_UNIT")?;
         let unit = select_unit_for_scope(query.scope, system_unit, user_unit);
 
-        if let Some(unit_filter) = query.unit.as_deref() {
-            if unit
+        if let Some(unit_filter) = query.unit.as_deref()
+            && unit
                 .as_deref()
                 .map(|entry_unit| !entry_unit.eq_ignore_ascii_case(unit_filter))
                 .unwrap_or(true)
-            {
-                continue;
-            }
+        {
+            continue;
         }
 
-        if let Some(unit) = unit.as_deref() {
-            if query
+        if let Some(unit) = unit.as_deref()
+            && query
                 .exclude_units
                 .iter()
                 .any(|excluded| excluded.eq_ignore_ascii_case(unit))
-            {
-                continue;
-            }
+        {
+            continue;
         }
 
         let Some(timestamp) = DateTime::<Utc>::from_timestamp_micros(timestamp_unix_usec) else {
@@ -1510,13 +1573,13 @@ async fn read_failed_dependencies(
         .collect::<Vec<_>>();
     let mut dependencies = classify_failed_dependencies(requires, wants, &rows);
     for dependency in &mut dependencies {
-        if dependency.unit.ends_with(".service") {
-            if let Some(row) = rows.iter().find(|row| row.name == dependency.unit) {
-                dependency.result = fetch_service_details(connection, &row.unit_path)
-                    .await
-                    .ok()
-                    .and_then(|details| details.result);
-            }
+        if dependency.unit.ends_with(".service")
+            && let Some(row) = rows.iter().find(|row| row.name == dependency.unit)
+        {
+            dependency.result = fetch_service_details(connection, &row.unit_path)
+                .await
+                .ok()
+                .and_then(|details| details.result);
         }
     }
     Ok(dependencies)
@@ -1540,7 +1603,7 @@ fn read_unit_transitions(
             return Err(AppError::bad_request(
                 "invalid_scope",
                 "transition lookup requires a concrete scope",
-            ))
+            ));
         }
     }
     let mut reader = options
@@ -1630,11 +1693,65 @@ fn read_journal_field(
 #[cfg(test)]
 mod tests {
     use super::{
+        JournalCursorNavigation, JournalLogEntry, RawUnit, UnitScope, UnitStatus,
         classify_failed_dependencies, combine_scope_rows_by_key, map_and_sort_service_units,
-        map_and_sort_timer_units, transition_kind, JournalLogEntry, RawUnit, UnitScope, UnitStatus,
+        map_and_sort_timer_units, position_at_exact_cursor, transition_kind,
     };
     use crate::errors::AppError;
     use zbus::zvariant::OwnedObjectPath;
+
+    struct MockCursorNavigation {
+        selected: u64,
+        exact: bool,
+    }
+
+    impl JournalCursorNavigation for MockCursorNavigation {
+        /// Accepts every synthetic cursor seek.
+        fn seek_to_cursor(&mut self, _cursor: &str) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        /// Returns the configured selection count.
+        fn select_sought_entry(&mut self) -> std::io::Result<u64> {
+            Ok(self.selected)
+        }
+
+        /// Returns whether the synthetic selected entry exactly matched.
+        fn selected_entry_matches(&self, _cursor: &str) -> std::io::Result<bool> {
+            Ok(self.exact)
+        }
+    }
+
+    /// Accepts a cursor only after the selected entry compares exactly.
+    #[test]
+    fn exact_cursor_position_is_accepted() {
+        let mut journal = MockCursorNavigation {
+            selected: 1,
+            exact: true,
+        };
+
+        position_at_exact_cursor(&mut journal, "s=exact;i=1")
+            .expect("exact cursor should be accepted");
+    }
+
+    /// Rejects libsystemd nearest-entry fallback for an expired cursor.
+    #[test]
+    fn nearest_entry_cursor_position_is_rejected() {
+        let mut journal = MockCursorNavigation {
+            selected: 1,
+            exact: false,
+        };
+
+        let error = position_at_exact_cursor(&mut journal, "s=expired;i=1")
+            .expect_err("nearest entry must not satisfy an expired cursor");
+        assert!(matches!(
+            error,
+            AppError::BadRequest {
+                code: "invalid_cursor",
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn filters_non_service_and_sorts() {
@@ -1884,17 +2001,25 @@ mod tests {
         );
 
         assert_eq!(dependencies.len(), 3);
-        assert!(dependencies
-            .iter()
-            .any(|item| item.unit == "failed.service" && item.relationship == "requires"));
-        assert!(dependencies
-            .iter()
-            .any(|item| item.unit == "missing.service" && item.load_state == "not-found"));
-        assert!(dependencies
-            .iter()
-            .any(|item| item.unit == "unloaded.target" && item.relationship == "wants"));
-        assert!(!dependencies
-            .iter()
-            .any(|item| item.unit == "healthy.service"));
+        assert!(
+            dependencies
+                .iter()
+                .any(|item| item.unit == "failed.service" && item.relationship == "requires")
+        );
+        assert!(
+            dependencies
+                .iter()
+                .any(|item| item.unit == "missing.service" && item.load_state == "not-found")
+        );
+        assert!(
+            dependencies
+                .iter()
+                .any(|item| item.unit == "unloaded.target" && item.relationship == "wants")
+        );
+        assert!(
+            !dependencies
+                .iter()
+                .any(|item| item.unit == "healthy.service")
+        );
     }
 }

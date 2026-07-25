@@ -10,7 +10,7 @@ use rust_mcp_sdk::schema::{
     PingRequest, ProtocolVersion, ReadResourceRequest, ServerCapabilities,
     ServerCapabilitiesResources, ServerCapabilitiesTools,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::info;
 
 use crate::domain::{
@@ -21,7 +21,7 @@ use crate::mcp::rpc::{
     app_error_to_json_rpc, is_json_rpc_error, json_rpc_invalid_params, json_rpc_invalid_request,
     json_rpc_method_not_found, json_rpc_result, request_id_to_value,
 };
-use crate::{errors::AppError, AppState};
+use crate::{AppState, errors::AppError};
 
 pub const MIN_SUPPORTED_PROTOCOL_VERSION: &str = "2024-11-05";
 pub const FALLBACK_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V2025_03_26;
@@ -36,6 +36,13 @@ pub async fn handle_json_rpc_value(state: &AppState, payload: Value) -> Option<V
     }
 
     let request_id = payload.get("id").cloned();
+    if request_id
+        .as_ref()
+        .is_some_and(|id| !is_valid_request_id(id))
+    {
+        return Some(json_rpc_invalid_request(None));
+    }
+
     let parsed: JsonrpcMessage = match serde_json::from_value(payload) {
         Ok(message) => message,
         Err(_) => return Some(json_rpc_invalid_request(request_id)),
@@ -80,6 +87,15 @@ pub async fn handle_json_rpc_value(state: &AppState, payload: Value) -> Option<V
             Some(json_rpc_invalid_request(request_id))
         }
     }
+}
+
+/// Returns whether a present JSON-RPC request ID has a supported scalar type.
+///
+/// MCP request IDs are strings or signed integers. Rejecting every other JSON
+/// type before untagged message decoding prevents malformed requests from being
+/// misclassified and executed as notifications.
+fn is_valid_request_id(id: &Value) -> bool {
+    id.is_string() || id.as_i64().is_some()
 }
 
 /// Validates method-specific request envelope shape before dispatch.
@@ -314,10 +330,20 @@ pub fn is_sensitive_key(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        negotiate_protocol_version, redact_audit_params, FALLBACK_PROTOCOL_VERSION,
-        MIN_SUPPORTED_PROTOCOL_VERSION,
+        FALLBACK_PROTOCOL_VERSION, MIN_SUPPORTED_PROTOCOL_VERSION, is_valid_request_id,
+        negotiate_protocol_version, redact_audit_params,
     };
     use serde_json::json;
+
+    /// Covers every JSON type accepted or rejected for a present request ID.
+    #[test]
+    fn validates_request_id_scalar_types() {
+        assert!(is_valid_request_id(&json!(1)));
+        assert!(is_valid_request_id(&json!("request-1")));
+        for invalid in [json!(null), json!(1.5), json!([]), json!({})] {
+            assert!(!is_valid_request_id(&invalid));
+        }
+    }
 
     #[test]
     fn redacts_sensitive_fields_in_audit_params() {

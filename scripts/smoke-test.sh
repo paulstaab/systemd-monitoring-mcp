@@ -503,7 +503,7 @@ echo "[smoke] checking POST /mcp tools/call list_services summary"
 list_services_summary_body="$(curl -sS -X POST \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"jsonrpc":"2.0","id":161,"method":"tools/call","params":{"name":"list_services","arguments":{"summary":true}}}' \
+  -d '{"jsonrpc":"2.0","id":161,"method":"tools/call","params":{"name":"list_services","arguments":{"summary":true,"limit":1}}}' \
   "${BASE_URL}/mcp")"
 assert_contains "$list_services_summary_body" '"summary"' "tools/call list_services summary did not include summary block"
 assert_contains "$list_services_summary_body" '"counts_by_active_state"' "tools/call list_services summary missing counts_by_active_state"
@@ -511,6 +511,16 @@ assert_contains "$list_services_summary_body" '"failed_units"' "tools/call list_
 assert_contains "$list_services_summary_body" '"total"' "tools/call list_services summary missing total metadata"
 assert_contains "$list_services_summary_body" '"returned"' "tools/call list_services summary missing returned metadata"
 assert_contains "$list_services_summary_body" '"truncated"' "tools/call list_services summary missing truncated metadata"
+assert_contains "$list_services_summary_body" '"returned":1' "tools/call list_services summary did not apply limit"
+
+echo "[smoke] checking malformed JSON-RPC request id"
+invalid_id_body="$(curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{"jsonrpc":"2.0","id":{},"method":"tools/call","params":{"name":"list_services","arguments":{}}}' \
+  "${BASE_URL}/mcp")"
+assert_contains "$invalid_id_body" '"code":-32600' "malformed JSON-RPC id did not return invalid request"
+assert_contains "$invalid_id_body" '"id":null' "malformed JSON-RPC id response did not use null id"
 
 echo "[smoke] checking POST /mcp tools/call list_logs invalid limit"
 list_logs_invalid_limit_body="$(curl -sS -X POST \

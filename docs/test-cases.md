@@ -56,6 +56,7 @@ Case 2 — network access with a valid token, including a malicious client or ru
 
 - Invalid JSON payload returns JSON-RPC error `-32700`.
 - Envelope with missing/invalid required fields returns JSON-RPC error `-32600`.
+- Envelope with a present null, fractional, array, or object `id` returns JSON-RPC error `-32600`, uses a null response ID, and invokes no monitoring provider.
 - Unknown method returns JSON-RPC error `-32601`.
 - Method with invalid params returns JSON-RPC error `-32602`.
 - Notification request (no `id`) yields no JSON-RPC response body.
@@ -70,6 +71,7 @@ Case 2 — network access with a valid token, including a malicious client or ru
 - `tools/list` `list_services` description explains supported `scope`, `state`, and `limit` values.
 - `tools/list` `list_timers` description explains supported `scope`, non-empty `state`, `sort`, `order`, and `limit` values.
 - `tools/list` `list_logs` description explains that unset optional `priority` and `unit` filters must be omitted, `priority` is a severity threshold rather than regex, and `grep` is for message matching.
+- `tools/list` advertises `end_utc` as required and `start_utc` as optional, with guidance that `start_utc` is required unless `since_last_start=true`.
 - Successful `tools/call` responses include canonical machine-readable JSON in `structuredContent`.
 - `tools/call` with unknown tool name returns JSON-RPC error `-32601` (or project-defined equivalent for tool-not-found) with stable error data.
 
@@ -93,6 +95,7 @@ Case 2 — network access with a valid token, including a malicious client or ru
 - `list_services` with `state=failed` applies failed-first then unit sort order.
 - `list_services` structured output includes per-row `scope` and metadata: `total`, `returned`, `truncated`, `generated_at_utc`.
 - `list_services` with `summary=true` returns compact `summary` block with `counts_by_active_state`, `failed_units`, and `degraded_hint`, plus metadata: `total`, `returned`, `truncated`, `generated_at_utc`.
+- `list_services` with `summary=true` and a restrictive `limit` summarizes only the limited page while reporting the full pre-limit `total`, limited `returned`, and truthful `truncated`.
 
 ### Tool: `list_logs`
 
@@ -147,6 +150,7 @@ Case 2 — network access with a valid token, including a malicious client or ru
 - Partial metadata failures (for example trigger or persistence not available) do not fail the call; affected fields are `null`.
 - `list_timers` structured output includes per-row `scope` and metadata: `total_scanned`, `returned`, `truncated`, `generated_at_utc`.
 - `list_timers` with `summary=true` returns compact `summary` block with `counts_by_active_state`, `overdue_count`, `next_due_soon` (top 5), and `failed_or_problem_timers`, plus metadata: `total_scanned`, `returned`, `truncated`, `generated_at_utc`.
+- `list_timers` with `summary=true` and a restrictive `limit` summarizes only the limited page while reporting the full pre-limit `total_scanned`, limited `returned`, and truthful `truncated`.
 
 ## MCP Resources
 
@@ -171,7 +175,7 @@ Case 2 — network access with a valid token, including a malicious client or ru
 
 - `get_unit_status` covers complete/partial properties, both concrete scopes, invalid/non-service/missing units, direct failed/missing dependencies, newest-first bounded transitions, and no recursion.
 - Podman inspection covers running/stopped/unhealthy/rootless/read-only/mounted and pod-member fixtures, unavailable CLI/runtime, timeout, nonzero/not-found, malformed/oversized JSON, hostile identifiers, and exclusion of verbose metadata.
-- Log pagination covers ascending/descending exclusive continuation without gaps or duplicates, exhausted/invalid cursors, filter continuity, all projections, invalid/duplicate fields, grouping counts/order and raw-page continuation.
+- Log pagination covers ascending/descending exclusive continuation without gaps or duplicates, exact-cursor validation, exhausted/invalid/expired cursors, filter continuity, all projections, invalid/duplicate fields, grouping counts/order and raw-page continuation.
 - Log bounds cover literal versus slash-delimited regex grep, unit-start derivation/unavailability, exact seven-day acceptance, and `maximum_start_utc` error details.
 - `tools/list` advertises strict schemas for `get_unit_status`, `get_container_status`, and `get_pod_status`; successful calls use `structuredContent` and failures preserve stable JSON-RPC shapes.
 

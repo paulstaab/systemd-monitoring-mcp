@@ -1,9 +1,10 @@
 //! Detailed systemd service inspection MCP handler.
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{
+    AppState,
     domain::{
         responses::tool_success_response,
         utils::{normalize_scope, normalize_unit},
@@ -11,7 +12,6 @@ use crate::{
     errors::AppError,
     mcp::rpc::{app_error_to_json_rpc, json_rpc_invalid_params},
     systemd_client::UnitScope,
-    AppState,
 };
 
 #[derive(Debug, Deserialize)]
@@ -37,7 +37,7 @@ pub async fn handle(
             return app_error_to_json_rpc(
                 id,
                 AppError::bad_request("invalid_unit", "unit must be a valid .service name"),
-            )
+            );
         }
     };
     let scope = match normalize_scope(params.scope) {
@@ -47,7 +47,7 @@ pub async fn handle(
             return app_error_to_json_rpc(
                 id,
                 AppError::bad_request("invalid_scope", "scope must be system or user"),
-            )
+            );
         }
     };
     let limit = params.transition_limit.unwrap_or(20);

@@ -10,7 +10,7 @@ use axum::{
 };
 use thiserror::Error;
 
-use crate::{errors::AppError, AppState};
+use crate::{AppState, errors::AppError};
 
 pub const DEFAULT_REQUESTS_PER_SECOND: u32 = 10;
 pub const DEFAULT_BURST: u32 = 20;

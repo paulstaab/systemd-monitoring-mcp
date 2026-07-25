@@ -1,7 +1,8 @@
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
+use crate::AppState;
 use crate::domain::responses::{generated_at_utc_string, paginate_rows, tool_success_response};
 use crate::domain::utils::{
     filter_services_by_name_contains, filter_services_by_state, normalize_name_contains,
@@ -10,7 +11,6 @@ use crate::domain::utils::{
 use crate::errors::AppError;
 use crate::mcp::rpc::{app_error_to_json_rpc, json_rpc_invalid_params};
 use crate::systemd_client::UnitScope;
-use crate::AppState;
 
 use super::ServicesQueryParams;
 
@@ -142,26 +142,24 @@ pub async fn handle_list_services(
             let failed_first = normalized.state_filter.as_deref() == Some("failed");
             sort_services(&mut services, failed_first);
 
+            let page = paginate_rows(services, normalized.limit);
+            let generated_at_utc = generated_at_utc_string();
+
             if normalized.summary_enabled {
-                let summary = build_service_summary(&services);
-                let total = services.len();
-                let generated_at_utc = generated_at_utc_string();
+                let summary = build_service_summary(&page.rows);
 
                 return tool_success_response(
                     id,
                     "Returned service triage summary".to_string(),
                     serde_json::Map::from_iter([
                         ("summary".to_string(), json!(summary)),
-                        ("total".to_string(), json!(total)),
-                        ("returned".to_string(), json!(total)),
-                        ("truncated".to_string(), json!(false)),
+                        ("total".to_string(), json!(page.total)),
+                        ("returned".to_string(), json!(page.returned)),
+                        ("truncated".to_string(), json!(page.truncated)),
                         ("generated_at_utc".to_string(), json!(generated_at_utc)),
                     ]),
                 );
             }
-
-            let page = paginate_rows(services, normalized.limit);
-            let generated_at_utc = generated_at_utc_string();
 
             tool_success_response(
                 id,
