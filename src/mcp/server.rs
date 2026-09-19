@@ -4,12 +4,7 @@
 //! negotiation (`initialize`), and tool/resource integrations routing mapping.
 
 use chrono::NaiveDate;
-use rust_mcp_sdk::schema::{
-    CallToolRequest, Implementation, InitializeRequest, InitializeResult, JsonrpcMessage,
-    JsonrpcRequest, ListResourcesRequest, ListResourcesResult, ListToolsRequest, ListToolsResult,
-    PingRequest, ProtocolVersion, ReadResourceRequest, ServerCapabilities,
-    ServerCapabilitiesResources, ServerCapabilitiesTools,
-};
+use rust_mcp_sdk::schema::{JsonrpcMessage, JsonrpcRequest, ProtocolVersion};
 use serde_json::{Value, json};
 use tracing::info;
 
@@ -102,16 +97,13 @@ fn is_valid_request_id(id: &Value) -> bool {
 ///
 /// Returns JSON-RPC `-32602` when method params do not satisfy expected schema.
 pub fn validate_request_shape(request: &JsonrpcRequest) -> Result<(), Value> {
-    let payload = serde_json::to_value(request).expect("jsonrpc request serialization");
     let request_id = Some(request_id_to_value(request.id.clone()));
 
     let valid = match request.method.as_str() {
-        "tools/call" => serde_json::from_value::<CallToolRequest>(payload).is_ok(),
-        "resources/read" => serde_json::from_value::<ReadResourceRequest>(payload).is_ok(),
-        "tools/list" => serde_json::from_value::<ListToolsRequest>(payload).is_ok(),
-        "resources/list" => serde_json::from_value::<ListResourcesRequest>(payload).is_ok(),
-        "ping" => serde_json::from_value::<PingRequest>(payload).is_ok(),
-        "initialize" => serde_json::from_value::<InitializeRequest>(payload).is_ok(),
+        "tools/call" => validate_tool_call_params(request),
+        "resources/read" => validate_resource_read_params(request),
+        "tools/list" | "resources/list" | "ping" => true,
+        "initialize" => validate_initialize_request_params(request),
         _ => true,
     };
 
@@ -120,6 +112,51 @@ pub fn validate_request_shape(request: &JsonrpcRequest) -> Result<(), Value> {
     } else {
         Err(json_rpc_invalid_params(request_id))
     }
+}
+
+/// Validates the stable tools/call parameter shape.
+///
+/// A tool name is required and arguments, when supplied, must be an object.
+/// Tool-specific argument validation remains in the selected handler.
+fn validate_tool_call_params(request: &JsonrpcRequest) -> bool {
+    let Some(params) = request.params.as_ref() else {
+        return false;
+    };
+
+    params.get("name").is_some_and(Value::is_string)
+        && params.get("arguments").is_none_or(Value::is_object)
+}
+
+/// Validates the stable resources/read parameter shape.
+///
+/// Resource routing only requires a string URI; unknown but well-formed URIs
+/// are dispatched so the handler can return its stable resource-not-found error.
+fn validate_resource_read_params(request: &JsonrpcRequest) -> bool {
+    request
+        .params
+        .as_ref()
+        .and_then(|params| params.get("uri"))
+        .is_some_and(Value::is_string)
+}
+
+/// Validates the stable initialize fields supported by this server.
+///
+/// The SDK's default schema currently targets a newer draft that removed the
+/// initialize request, so validation is kept local to the protocol versions
+/// advertised by this server. Extra capability and client-info fields remain
+/// allowed, while the three required fields must have their MCP-defined types.
+fn validate_initialize_request_params(request: &JsonrpcRequest) -> bool {
+    let Some(params) = request.params.as_ref() else {
+        return false;
+    };
+    let Some(client_info) = params.get("clientInfo").and_then(Value::as_object) else {
+        return false;
+    };
+
+    params.get("protocolVersion").is_some_and(Value::is_string)
+        && params.get("capabilities").is_some_and(Value::is_object)
+        && client_info.get("name").is_some_and(Value::is_string)
+        && client_info.get("version").is_some_and(Value::is_string)
 }
 
 /// Executes a parsed JSON-RPC request method and returns a response payload.
@@ -140,56 +177,24 @@ pub async fn handle_json_rpc_request(
                 Err(err) => return app_error_to_json_rpc(id, err),
             };
 
-            let initialize_result = InitializeResult {
-                server_info: Implementation {
-                    name: env!("CARGO_PKG_NAME").to_string(),
-                    version: env!("CARGO_PKG_VERSION").to_string(),
-                    title: None,
-                    description: None,
-                    icons: vec![],
-                    website_url: None,
+            let initialize_result = json!({
+                "protocolVersion": protocol_version.to_string(),
+                "capabilities": {
+                    "tools": { "listChanged": false },
+                    "resources": { "subscribe": false, "listChanged": false }
                 },
-                capabilities: ServerCapabilities {
-                    tools: Some(ServerCapabilitiesTools {
-                        list_changed: Some(false),
-                    }),
-                    resources: Some(ServerCapabilitiesResources {
-                        subscribe: Some(false),
-                        list_changed: Some(false),
-                    }),
-                    prompts: None,
-                    ..Default::default()
-                },
-                protocol_version: protocol_version.into(),
-                instructions: None,
-                meta: None,
-            };
+                "serverInfo": {
+                    "name": env!("CARGO_PKG_NAME"),
+                    "version": env!("CARGO_PKG_VERSION")
+                }
+            });
 
-            json_rpc_result(
-                id,
-                serde_json::to_value(initialize_result).expect("initialize result serialization"),
-            )
+            json_rpc_result(id, initialize_result)
         }
         "ping" => json_rpc_result(id, json!({})),
-        "tools/list" => json_rpc_result(
-            id,
-            serde_json::to_value(ListToolsResult {
-                meta: None,
-                next_cursor: None,
-                tools: build_tools_list(),
-            })
-            .expect("tools list result serialization"),
-        ),
+        "tools/list" => json_rpc_result(id, json!({ "tools": build_tools_list() })),
         "tools/call" => handle_tools_call(state, id, params).await,
-        "resources/list" => json_rpc_result(
-            id,
-            serde_json::to_value(ListResourcesResult {
-                meta: None,
-                next_cursor: None,
-                resources: build_resources_list(),
-            })
-            .expect("resources list result serialization"),
-        ),
+        "resources/list" => json_rpc_result(id, json!({ "resources": build_resources_list() })),
         "resources/read" => handle_resources_read(state, id, params).await,
         _ => json_rpc_method_not_found(id),
     };

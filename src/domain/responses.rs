@@ -4,10 +4,7 @@
 //! consistent across tools and resources while preserving existing behavior.
 
 use chrono::{SecondsFormat, Utc};
-use rust_mcp_sdk::schema::{
-    CallToolResult, ContentBlock, ReadResourceContent, ReadResourceResult, TextContent,
-    TextResourceContents,
-};
+use rust_mcp_sdk::schema::{ContentBlock, TextContent};
 use serde_json::{Map, Value};
 
 use crate::mcp::rpc::json_rpc_result;
@@ -58,13 +55,10 @@ pub fn tool_success_response(
 ) -> Value {
     json_rpc_result(
         id,
-        serde_json::to_value(CallToolResult {
-            content: vec![ContentBlock::from(TextContent::new(message, None, None))],
-            is_error: None,
-            meta: None,
-            structured_content: Some(structured_content),
-        })
-        .expect("tool success result serialization"),
+        serde_json::json!({
+            "content": [ContentBlock::from(TextContent::new(message, None, None))],
+            "structuredContent": Value::Object(structured_content)
+        }),
     )
 }
 
@@ -77,16 +71,13 @@ pub fn json_text_resource_response(
     uri: &str,
     structured_content: Value,
 ) -> Value {
-    let result = serde_json::to_value(ReadResourceResult {
-        contents: vec![ReadResourceContent::from(TextResourceContents {
-            meta: None,
-            mime_type: Some("application/json".to_string()),
-            text: structured_content.to_string(),
-            uri: uri.to_string(),
-        })],
-        meta: None,
-    })
-    .expect("resource read result serialization");
+    let result = serde_json::json!({
+        "contents": [{
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": structured_content.to_string()
+        }]
+    });
 
     json_rpc_result(id, result)
 }

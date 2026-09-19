@@ -8,10 +8,7 @@ mod services;
 mod timers;
 mod unit_status;
 
-use rust_mcp_sdk::{
-    macros,
-    schema::{CallToolRequestParams, Tool},
-};
+use rust_mcp_sdk::{macros, schema::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -20,6 +17,12 @@ use crate::mcp::rpc::{json_rpc_invalid_params, json_rpc_method_not_found_with_da
 
 pub use logs::build_log_query;
 pub use timers::{TimerItem, parse_timers_query_params, sort_timer_items};
+
+#[derive(Debug, Deserialize)]
+struct ToolCallParams {
+    name: String,
+    arguments: Option<serde_json::Map<String, Value>>,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct ServicesQueryParams {
@@ -173,7 +176,7 @@ pub async fn handle_tools_call(
         return json_rpc_invalid_params(id);
     };
 
-    let tool_call: CallToolRequestParams = match serde_json::from_value(raw_params) {
+    let tool_call: ToolCallParams = match serde_json::from_value(raw_params) {
         Ok(value) => value,
         Err(_) => return json_rpc_invalid_params(id),
     };

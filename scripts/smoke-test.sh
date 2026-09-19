@@ -231,6 +231,7 @@ mcp_initialize_status="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
 [[ "$mcp_initialize_status" == "200" ]] || fail "/mcp initialize returned status ${mcp_initialize_status}, expected 200"
 assert_contains "$mcp_initialize_body" '"jsonrpc":"2.0"' "initialize did not return jsonrpc envelope"
 assert_contains "$mcp_initialize_body" '"protocolVersion":"2024-11-05"' "initialize did not return protocolVersion"
+assert_not_contains "$mcp_initialize_body" '"resultType"' "initialize returned a draft-only resultType field"
 
 
 echo "[smoke] checking POST /mcp tools/list"
@@ -251,6 +252,9 @@ assert_contains "$tools_list_body" '"list_logs"' "tools/list did not include lis
 assert_contains "$tools_list_body" '"get_unit_status"' "tools/list did not include get_unit_status"
 assert_contains "$tools_list_body" '"get_container_status"' "tools/list did not include get_container_status"
 assert_contains "$tools_list_body" '"get_pod_status"' "tools/list did not include get_pod_status"
+assert_not_contains "$tools_list_body" '"resultType"' "tools/list returned a draft-only resultType field"
+assert_not_contains "$tools_list_body" '"cacheScope"' "tools/list returned a draft-only cacheScope field"
+assert_not_contains "$tools_list_body" '"ttlMs"' "tools/list returned a draft-only ttlMs field"
 assert_contains "$tools_list_body" 'state accepts active' "tools/list list_services guidance did not mention valid states"
 assert_contains "$tools_list_body" 'sort accepts next, last, name, or state' "tools/list list_timers guidance did not mention valid sort values"
 assert_contains "$tools_list_body" 'order accepts asc or desc' "tools/list list_timers guidance did not mention valid order values"

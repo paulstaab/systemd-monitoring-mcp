@@ -3,9 +3,7 @@
 //! Provides standardized mapping of internal AppErrors to valid JSON-RPC payloads.
 
 use crate::errors::AppError;
-use rust_mcp_sdk::schema::{
-    JsonrpcErrorResponse, JsonrpcResultResponse, RequestId, Result as McpResult, RpcError,
-};
+use rust_mcp_sdk::schema::{JsonrpcErrorResponse, RequestId, RpcError};
 use serde_json::{Value, json};
 
 /// Returns `true` when a JSON-RPC response payload contains an `error` object.
@@ -144,14 +142,9 @@ pub fn json_rpc_error_with_data(
 
 /// Creates a JSON-RPC result response preserving request id semantics.
 ///
-/// If id conversion fails, this falls back to a raw JSON-RPC result envelope.
+/// The envelope is built directly because the SDK's default draft schema adds
+/// result fields that are not part of the stable versions advertised here.
 pub fn json_rpc_result(id: Option<Value>, result: Value) -> Value {
-    if let Some(request_id) = id.as_ref().and_then(value_to_request_id) {
-        let extra = result.as_object().cloned();
-        let response = JsonrpcResultResponse::new(request_id, McpResult { meta: None, extra });
-        return serde_json::to_value(response).expect("jsonrpc result response serialization");
-    }
-
     json!({
         "jsonrpc": "2.0",
         "id": id,
