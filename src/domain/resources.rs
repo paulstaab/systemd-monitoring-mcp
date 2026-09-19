@@ -3,7 +3,8 @@
 //! Exposes host system snapshots as file-like resources under `resource://` URIs.
 
 use chrono::{Duration, Utc};
-use rust_mcp_sdk::schema::{ReadResourceRequestParams, Resource};
+use rust_mcp_sdk::schema::Resource;
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::domain::responses::json_text_resource_response;
@@ -19,6 +20,11 @@ use crate::{
 pub const SERVICES_RESOURCE_URI: &str = "resource://services/snapshot";
 pub const FAILED_SERVICES_RESOURCE_URI: &str = "resource://services/failed";
 pub const LOGS_RESOURCE_URI: &str = "resource://logs/recent";
+
+#[derive(Debug, Deserialize)]
+struct ResourceReadParams {
+    uri: String,
+}
 
 /// Builds the MCP resource catalog exposed by `resources/list`.
 ///
@@ -74,7 +80,7 @@ pub async fn handle_resources_read(
         return json_rpc_invalid_params(id);
     };
 
-    let resource_read: ReadResourceRequestParams = match serde_json::from_value(raw_params) {
+    let resource_read: ResourceReadParams = match serde_json::from_value(raw_params) {
         Ok(value) => value,
         Err(_) => return json_rpc_invalid_params(id),
     };

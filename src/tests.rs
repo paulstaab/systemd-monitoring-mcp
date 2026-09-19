@@ -705,6 +705,9 @@ async fn mcp_initialize_returns_result() {
     assert!(body_json["result"]["capabilities"]["tools"].is_object());
     assert!(body_json["result"]["capabilities"]["resources"].is_object());
     assert!(body_json["result"]["capabilities"]["prompts"].is_null());
+    assert!(body_json["result"].get("resultType").is_none());
+    assert!(body_json["result"].get("cacheScope").is_none());
+    assert!(body_json["result"].get("ttlMs").is_none());
 }
 
 #[tokio::test]
@@ -804,6 +807,9 @@ async fn mcp_tools_list_returns_required_tools() {
     assert_eq!(body_json["jsonrpc"], "2.0");
     assert_eq!(body_json["id"], 2);
     assert!(body_json["result"]["tools"].is_array());
+    assert!(body_json["result"].get("resultType").is_none());
+    assert!(body_json["result"].get("cacheScope").is_none());
+    assert!(body_json["result"].get("ttlMs").is_none());
     assert_eq!(body_json["result"]["tools"][0]["name"], "list_services");
     assert_eq!(body_json["result"]["tools"][1]["name"], "list_timers");
     assert_eq!(body_json["result"]["tools"][2]["name"], "list_logs");
@@ -1745,6 +1751,9 @@ async fn mcp_resources_read_returns_contents_only() {
     assert_eq!(body_json["id"], 4);
     assert!(body_json["result"]["contents"].is_array());
     assert!(body_json["result"].get("structuredContent").is_none());
+    assert!(body_json["result"].get("resultType").is_none());
+    assert!(body_json["result"].get("cacheScope").is_none());
+    assert!(body_json["result"].get("ttlMs").is_none());
 }
 
 #[tokio::test]
