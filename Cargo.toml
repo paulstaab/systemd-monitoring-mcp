@@ -1,6 +1,6 @@
 [package]
 name = "systemd-monitoring-mcp"
-version = "0.13.1"
+version = "0.13.2"
 edition = "2024"
 
 [dependencies]
@@ -20,7 +20,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "process", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
-zbus = { version = "5", features = ["tokio"] }
+zbus = { version = "6", features = ["tokio"] }
 
 [dev-dependencies]
 http-body-util = "0.1"

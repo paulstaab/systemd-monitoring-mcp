@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use systemd::{daemon, journal};
 use thiserror::Error;
 use tracing::warn;
-use zbus::{Connection, Proxy, zvariant::OwnedObjectPath};
+use zbus::{Connection, OwnedObjectPath, Proxy};
 
 use crate::errors::AppError;
 
@@ -1698,7 +1698,7 @@ mod tests {
         map_and_sort_timer_units, position_at_exact_cursor, transition_kind,
     };
     use crate::errors::AppError;
-    use zbus::zvariant::OwnedObjectPath;
+    use zbus::OwnedObjectPath;
 
     struct MockCursorNavigation {
         selected: u64,
