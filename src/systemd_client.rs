@@ -1244,17 +1244,17 @@ trait JournalCursorNavigation {
 impl JournalCursorNavigation for systemd::Journal {
     /// Delegates cursor seeking to libsystemd.
     fn seek_to_cursor(&mut self, cursor: &str) -> std::io::Result<()> {
-        self.seek_cursor(cursor)
+        Ok(self.seek_cursor(cursor)?)
     }
 
     /// Advances once so libsystemd selects the sought cursor entry.
     fn select_sought_entry(&mut self) -> std::io::Result<u64> {
-        self.next()
+        Ok(self.next()?)
     }
 
     /// Uses libsystemd cursor comparison because cursor strings are opaque.
     fn selected_entry_matches(&self, cursor: &str) -> std::io::Result<bool> {
-        self.test_cursor(cursor)
+        Ok(self.test_cursor(cursor)?)
     }
 }
 
